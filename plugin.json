@@ -1,0 +1,15 @@
+{
+  "id": "aiUsage",
+  "name": "AI Usage",
+  "description": "Claude Code and Codex subscription limits in the bar.",
+  "version": "0.1.0",
+  "author": "nitinranganath",
+  "type": "widget",
+  "capabilities": ["dankbar-widget"],
+  "component": "./AiUsageWidget.qml",
+  "settings": "./AiUsageSettings.qml",
+  "icon": "speed",
+  "requires_dms": ">=0.1.0",
+  "requires": ["jq", "curl"],
+  "permissions": ["settings_read", "settings_write", "process", "network"]
+}
