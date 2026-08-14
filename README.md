@@ -2,6 +2,12 @@
 
 Claude Code and Codex subscription limits in the DankBar.
 
+![The pill in the bar](assets/screenshots/bar.png)
+
+| Overview | Codex | Claude |
+| --- | --- | --- |
+| ![Overview tab](assets/screenshots/overview.png) | ![Codex tab](assets/screenshots/codex.png) | ![Claude tab](assets/screenshots/claude.png) |
+
 ## What it shows
 
 | Provider | Limits | Freshness |
