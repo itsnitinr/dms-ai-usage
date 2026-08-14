@@ -99,14 +99,26 @@ Item {
         }, 100, 30000)
     }
 
+    // Whether the popout is actually on screen. The limits fetch is cheap and
+    // feeds the bar pill, so it runs regardless; scanning session logs for a
+    // chart nobody is looking at is not, so analytics stop when the popout does.
+    property bool popoutVisible: false
+
     function refresh() {
         refreshLimits()
-        if (activeProvider !== "")
+        if (popoutVisible && activeProvider !== "")
             refreshHistory(activeProvider)
     }
 
     onActiveProviderChanged: {
         if (activeProvider !== "")
+            refreshHistory(activeProvider)
+    }
+
+    // Re-opening on a provider tab picks up whatever it missed while hidden. The
+    // script's own cache window keeps a quick close/open from rescanning.
+    onPopoutVisibleChanged: {
+        if (popoutVisible && activeProvider !== "")
             refreshHistory(activeProvider)
     }
 

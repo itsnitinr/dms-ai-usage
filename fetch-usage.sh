@@ -30,6 +30,35 @@ script_dir=$(CDPATH= cd -P "$(dirname "$0")" 2>/dev/null && pwd)
 
 mkdir -p "$(dirname "$cache")" 2>/dev/null
 
+version_cache="${cache%/*}/dms-ai-usage-claude-version"
+
+# `claude --version` starts the whole CLI — ~250 MB resident for a tenth of a
+# second — and this script runs every five minutes, so the answer is cached and
+# recomputed only when the binary itself changes. Size and mtime of the resolved
+# executable are enough to catch an upgrade.
+claude_version() {
+  bin=$(command -v claude 2>/dev/null) || return
+  [ -n "$bin" ] || return
+
+  stamp=$(stat -Lc '%s-%Y' "$bin" 2>/dev/null)
+  if [ -n "$stamp" ] && [ -s "$version_cache" ]; then
+    IFS='|' read -r cached_stamp cached_ver < "$version_cache" 2>/dev/null
+    if [ "$cached_stamp" = "$stamp" ] && [ -n "$cached_ver" ]; then
+      printf '%s' "$cached_ver"
+      return
+    fi
+  fi
+
+  ver=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  [ -n "$ver" ] || return
+  if [ -n "$stamp" ]; then
+    tmp_ver="$version_cache.tmp.$$"
+    printf '%s|%s\n' "$stamp" "$ver" > "$tmp_ver" 2>/dev/null \
+      && mv -f "$tmp_ver" "$version_cache" 2>/dev/null
+  fi
+  printf '%s' "$ver"
+}
+
 # Shared jq helpers: ISO-8601 (with optional fraction/zone) -> epoch seconds.
 JQ_LIB='
 def epoch(s):
@@ -53,7 +82,7 @@ claude_usage() {
   tok=$(jq -r '.claudeAiOauth.accessToken // empty' "$claude_creds" 2>/dev/null)
   [ -n "$tok" ] || { echo null; return; }
 
-  ver=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  ver=$(claude_version)
   body=$(curl -s -m 10 \
     -H "Authorization: Bearer $tok" \
     -H "anthropic-beta: oauth-2025-04-20" \

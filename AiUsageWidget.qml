@@ -1,5 +1,6 @@
 // Claude Code + Codex subscription limits and lazy local analytics.
 import QtQuick
+import QtQuick.Window
 import qs.Common
 import qs.Widgets
 import qs.Modules.Plugins
@@ -229,9 +230,24 @@ PluginComponent {
     popoutHeight: 0
     popoutContent: Component {
         PopoutComponent {
+            id: popoutRoot
             headerText: "AI Usage"
             showCloseButton: true
             closePopout: function () { root.closePopout() }
+
+            // DankPopout keeps this content tree loaded after close so re-opening
+            // is instant, which means destruction is not a close signal and the
+            // last provider tab would otherwise keep scanning session logs every
+            // five minutes for the rest of the session. Window visibility is the
+            // signal that actually tracks whether anything is on screen.
+            readonly property bool onScreen: Window.window?.visible ?? false
+
+            Binding {
+                target: root.usageData
+                when: root.usageData !== null
+                property: "popoutVisible"
+                value: popoutRoot.onScreen
+            }
 
             headerActions: Component {
                 DankActionButton {
