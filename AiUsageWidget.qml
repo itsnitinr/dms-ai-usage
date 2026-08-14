@@ -12,7 +12,6 @@ PluginComponent {
     // Thresholds kept in code so the settings page stays short.
     readonly property int warnPct: 70       // amber at/above
     readonly property int critPct: 90       // red at/above
-    readonly property int staleMinutes: 180 // flag a snapshot older than this
 
     readonly property bool showClaude: pluginData.showClaude !== false
     readonly property bool showCodex: pluginData.showCodex !== false
@@ -45,7 +44,6 @@ PluginComponent {
                 limits: data.claude.limits,
                 capturedAt: data.claude.captured_at || 0,
                 plan: "",
-                // Claude is queried live; Codex only updates when the CLI runs.
                 live: true
             })
         }
@@ -56,7 +54,7 @@ PluginComponent {
                 limits: data.codex.limits,
                 capturedAt: data.codex.captured_at || 0,
                 plan: data.codex.plan || "",
-                live: false
+                live: true
             })
         }
         return out
@@ -91,10 +89,6 @@ PluginComponent {
         if (mins <= 0)
             return "just now"
         return mins >= 60 ? Math.floor(mins / 60) + "h ago" : mins + "m ago"
-    }
-
-    function isStale(p) {
-        return !p.live && minutesSince(p.capturedAt) > staleMinutes
     }
 
     pillRightClickAction: function () { root.refresh() }
@@ -199,7 +193,7 @@ PluginComponent {
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.freshness(modelData)
-                                color: root.isStale(modelData) ? Theme.warning : Theme.surfaceTextMedium
+                                color: Theme.surfaceTextMedium
                                 font.pixelSize: Theme.fontSizeSmall
                             }
                         }

@@ -16,7 +16,7 @@ PluginSettings {
     ToggleSetting {
         settingKey: "showCodex"
         label: "Show Codex"
-        description: "Read from the newest Codex session log"
+        description: "Live subscription limits from Codex App Server"
         defaultValue: true
     }
 }

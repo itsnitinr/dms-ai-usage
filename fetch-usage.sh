@@ -5,11 +5,8 @@
 # Claude: reads the OAuth access token Claude Code already keeps on disk and asks
 # the same usage endpoint the client itself uses. Live, always current.
 #
-# Codex: the CLI does not expose a usage endpoint; it records a rate-limit
-# snapshot into its session rollout log on every turn. We read the newest such
-# snapshot, so the numbers are as fresh as your last Codex turn (the payload
-# carries absolute reset times, so a stale snapshot is still directionally right
-# until its window rolls over).
+# Codex: asks the local Codex app-server for the account's current ChatGPT
+# rate-limit buckets. This is live and does not inspect session rollout logs.
 #
 # Output:
 #   {captured_at, claude: {captured_at, limits:[{label,pct,resets_at}]}|null,
@@ -18,17 +15,18 @@
 # Env:
 #   CACHE_FILE      cache path (default $XDG_CACHE_HOME/dms-ai-usage.json)
 #   CLAUDE_CREDS    Claude Code credentials (default ~/.claude/.credentials.json)
-#   CODEX_HOME      Codex state dir (default ~/.codex)
+#   CODEX_CMD       Codex executable (default codex)
+#   CODEX_TIMEOUT   app-server response timeout in seconds (default 12)
 #   MIN_AGE         seconds before a cached result is refetched (default 150)
 #
 # Exit: 0 if at least one provider reported, 1 if neither did.
 set -u
 
 cache="${CACHE_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/dms-ai-usage.json}"
-codex_home="${CODEX_HOME:-$HOME/.codex}"
 claude_creds="${CLAUDE_CREDS:-$HOME/.claude/.credentials.json}"
 min_age="${MIN_AGE:-150}"
 now=$(date +%s)
+script_dir=$(CDPATH= cd -P "$(dirname "$0")" 2>/dev/null && pwd)
 
 mkdir -p "$(dirname "$cache")" 2>/dev/null
 
@@ -74,39 +72,39 @@ claude_usage() {
 }
 
 codex_usage() {
-  dir="$codex_home/sessions"
-  [ -d "$dir" ] || { echo null; return; }
+  command -v bash >/dev/null 2>&1 || { echo null; return; }
+  [ -n "$script_dir" ] || { echo null; return; }
 
-  # Newest rollout first; stop at the first one carrying a rate-limit snapshot.
-  line=""
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    l=$(grep -a '"rate_limits"' "$f" 2>/dev/null | tail -1)
-    if [ -n "$l" ]; then line=$l; break; fi
-  done <<EOF
-$(find "$dir" -name 'rollout-*.jsonl' -printf '%T@ %p\n' 2>/dev/null \
-  | sort -rn | head -20 | cut -d' ' -f2-)
-EOF
-  [ -n "$line" ] || { echo null; return; }
+  response=$(bash "$script_dir/fetch-codex-limits.sh" 2>/dev/null) || { echo null; return; }
+  [ -n "$response" ] || { echo null; return; }
 
-  # window_minutes names the limit; resets_at is absolute in newer Codex builds,
-  # older ones only give resets_in_seconds relative to the snapshot.
-  echo "$line" | jq "$JQ_LIB"'
+  echo "$response" | jq --argjson now "$now" '
     def win(m): if m == null then "Limit"
                 elif m >= 10080 then "Weekly"
                 elif m >= 1440 then ((m / 1440 | floor | tostring) + "-day")
                 elif m >= 60 then ((m / 60 | floor | tostring) + "-hour")
                 else ((m | tostring) + "-min") end;
-    def lim(b; ts): if b == null then empty
-                    else {label: win(b.window_minutes),
-                          pct: (b.used_percent | floor),
-                          resets_at: (b.resets_at // (ts + (b.resets_in_seconds // 0)))} end;
-    epoch(.timestamp) as $ts
-    | .payload.rate_limits
-    | select(. != null)
-    | {captured_at: $ts,
-       plan: (.plan_type // null),
-       limits: [lim(.primary; $ts), lim(.secondary; $ts)]}
+    def limit_label(n; m): win(m) as $window
+      | if n == null or n == "" or n == "codex" then $window
+        else (n + " · " + $window) end;
+    def lim(b; n): if b == null then empty
+                   else {label: limit_label(n; b.windowDurationMins),
+                         pct: (b.usedPercent | floor),
+                         resets_at: b.resetsAt} end;
+    .result as $result
+    | (if (($result.rateLimitsByLimitId // {}) | length) > 0
+       then [$result.rateLimitsByLimitId[]]
+       elif $result.rateLimits != null then [$result.rateLimits]
+       else [] end) as $buckets
+    | {captured_at: $now,
+       plan: ($result.rateLimits.planType
+              // ($buckets | map(.planType) | map(select(. != null)) | first)
+              // null),
+       limits: [$buckets[]
+                | . as $bucket
+                | lim($bucket.primary; $bucket.limitName),
+                  lim($bucket.secondary; $bucket.limitName)]}
+    | select(.limits | length > 0)
   ' 2>/dev/null || echo null
 }
 
