@@ -25,10 +25,25 @@ Column {
     }
     readonly property int chartHeight: 52
     readonly property int barGap: 2
+
+    // The chart is built empty and populated a moment later, so the first real
+    // data must land at its final height. Animating that transition is what
+    // makes a tab switch flash: the Repeater builds its delegates before `peak`
+    // has caught up with the new buckets, and the bars animate in from the
+    // height that stale scale implied. Later refreshes still animate.
+    property bool barsSettled: false
     readonly property real barWidth:
         Math.max(1, (width - barGap * Math.max(0, count - 1)) / Math.max(1, count))
 
     spacing: Theme.spacingS
+
+    // Reads buckets.length rather than `count`: derived bindings have not
+    // necessarily re-evaluated yet when this handler runs, which is the same
+    // staleness that produced the flash in the first place.
+    onBucketsChanged: {
+        if (buckets.length > 0 && !barsSettled)
+            Qt.callLater(function () { root.barsSettled = true })
+    }
 
     function formatTokens(n) {
         if (!n)
@@ -103,12 +118,20 @@ Column {
                     Rectangle {
                         anchors.bottom: parent.bottom
                         width: parent.width
-                        height: value <= 0 ? 0 : Math.max(2, value / Math.max(1, root.peak) * parent.height)
+                        // A non-positive peak means the scale has not caught up
+                        // with the data yet; dividing by a floor of 1 there turns
+                        // a raw token count into a bar height of millions.
+                        // Clamping keeps a stale scale inside the plot regardless.
+                        height: (value <= 0 || root.peak <= 0)
+                                ? 0
+                                : Math.max(2, Math.min(parent.height,
+                                                       value / root.peak * parent.height))
                         radius: Math.min(2, width / 2)
                         color: root.barColor
                         opacity: root.hovered < 0 || root.hovered === index ? 1 : 0.35
 
                         Behavior on height {
+                            enabled: root.barsSettled
                             NumberAnimation { duration: Theme.shortDuration; easing.type: Easing.OutCubic }
                         }
                         Behavior on opacity {
