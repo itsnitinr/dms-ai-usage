@@ -9,7 +9,7 @@ Claude Code and Codex subscription limits in the DankBar.
 | Claude | 5-hour, weekly | Live — queried on a 5 minute timer |
 | Codex | whatever windows your plan has (weekly on Plus) | Live — queried on a 5 minute timer |
 
-The bar shows a single `speed` icon, tinted by the highest utilization across
+The bar shows a single `auto_awesome` icon, tinted by the highest utilization across
 everything enabled: normal text color under 70%, amber at 70%, red at 90%. It
 stays quiet until something needs attention.
 

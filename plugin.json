@@ -8,7 +8,7 @@
   "capabilities": ["dankbar-widget"],
   "component": "./AiUsageWidget.qml",
   "settings": "./AiUsageSettings.qml",
-  "icon": "speed",
+  "icon": "auto_awesome",
   "requires_dms": ">=0.1.0",
   "requires": ["bash", "jq", "curl"],
   "permissions": ["settings_read", "settings_write", "process", "network"]
