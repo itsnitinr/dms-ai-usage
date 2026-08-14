@@ -1,8 +1,8 @@
 {
   "id": "aiUsage",
   "name": "AI Usage",
-  "description": "Claude Code and Codex subscription limits in the bar.",
-  "version": "0.1.1",
+  "description": "Claude Code and Codex limits with local token analytics.",
+  "version": "0.2.0",
   "author": "nitinranganath",
   "type": "widget",
   "capabilities": ["dankbar-widget"],

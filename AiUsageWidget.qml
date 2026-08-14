@@ -1,5 +1,4 @@
-// Claude Code + Codex subscription limits: one status icon in the bar, the
-// numbers in the popout.
+// Claude Code + Codex subscription limits and lazy local analytics.
 import QtQuick
 import qs.Common
 import qs.Widgets
@@ -9,93 +8,207 @@ PluginComponent {
     id: root
     pluginId: "aiUsage"
 
-    // Thresholds kept in code so the settings page stays short.
-    readonly property int warnPct: 70       // amber at/above
-    readonly property int critPct: 90       // red at/above
-
+    readonly property int warnPct: 70
+    readonly property int critPct: 90
     readonly property bool showClaude: pluginData.showClaude !== false
     readonly property bool showCodex: pluginData.showCodex !== false
-
-    // Content is inset to line up with the popout header's own left margin.
     readonly property real contentPadding: Theme.spacingS
 
-    AiUsageData { id: data }
+    property int currentTab: 0            // Overview, Codex, Claude
+    readonly property string activeProvider:
+        currentTab === 1 ? "codex" : currentTab === 2 ? "claude" : ""
 
-    // Inline Components can't resolve a sibling id, so everything goes through root.
-    readonly property bool hasData: data.hasData
-    readonly property bool fetchFailed: data.fetchFailed
-    readonly property int tick: data.now
+    // URL loading bypasses Qt's cached same-directory type table during an
+    // in-place plugin upgrade. The query also separates this revision from a
+    // previously cached AiUsageData component URL.
+    Loader {
+        id: dataLoader
+        source: Qt.resolvedUrl("AiUsageData.qml?dashboard=2")
+    }
+    readonly property var usageData: dataLoader.item
+    Binding {
+        target: dataLoader.item
+        when: dataLoader.item !== null
+        property: "activeProvider"
+        value: root.activeProvider
+    }
 
-    function countdown(reset) { return data.countdown(reset) }
-    function minutesSince(ts) { return data.minutesSince(ts) }
-    function refresh() { data.refresh() }
+    readonly property bool hasData: usageData?.hasData ?? false
+    readonly property bool fetchFailed: usageData?.fetchFailed ?? false
+    readonly property int tick: usageData?.now ?? Math.floor(Date.now() / 1000)
+
+    function countdown(reset) { return usageData ? usageData.countdown(reset) : "" }
+    function minutesSince(ts) { return usageData ? usageData.minutesSince(ts) : -1 }
+    function refresh() { if (usageData) usageData.refresh() }
+
+    readonly property var codexLimits: usageData?.codex?.limits ?? []
+    readonly property var claudeLimits: usageData?.claude?.limits ?? []
+    readonly property bool showCodexLimits: showCodex && codexLimits.length > 0
+    readonly property bool showClaudeLimits: showClaude && claudeLimits.length > 0
+    readonly property int visibleProviderCount:
+        (showCodexLimits ? 1 : 0) + (showClaudeLimits ? 1 : 0)
+
+    function remaining(pct) {
+        return Math.max(0, 100 - Math.max(0, Math.min(100, pct || 0)))
+    }
 
     function usageColor(pct) {
         return pct >= critPct ? Theme.error : pct >= warnPct ? Theme.warning : Theme.primary
     }
 
-    // Enabled providers that actually reported something.
-    function providers() {
-        const out = []
-        if (showClaude && data.claude && data.claude.limits && data.claude.limits.length > 0) {
-            out.push({
-                name: "Claude",
-                icon: Qt.resolvedUrl("assets/claude.svg").toString(),
-                limits: data.claude.limits,
-                capturedAt: data.claude.captured_at || 0,
-                plan: "",
-                live: true
-            })
-        }
-        if (showCodex && data.codex && data.codex.limits && data.codex.limits.length > 0) {
-            out.push({
-                name: "Codex",
-                icon: Qt.resolvedUrl("assets/codex.svg").toString(),
-                limits: data.codex.limits,
-                capturedAt: data.codex.captured_at || 0,
-                plan: data.codex.plan || "",
-                live: true
-            })
-        }
-        return out
-    }
-
-    // Highest utilization across everything shown, or -1 with no data.
     function maxPct() {
-        let m = -1
-        const ps = providers()
-        for (let i = 0; i < ps.length; i++)
-            for (let j = 0; j < ps[i].limits.length; j++)
-                m = Math.max(m, ps[i].limits[j].pct)
-        return m
+        let maximum = -1
+        const limits = codexLimits.concat(claudeLimits)
+        for (let i = 0; i < limits.length; i++)
+            maximum = Math.max(maximum, limits[i].pct)
+        return maximum
     }
 
-    // The bar icon sits among monochrome widgets, so it stays neutral until
-    // something actually needs attention.
     function pillColor() {
-        const m = maxPct()
-        if (m < 0)
+        const maximum = maxPct()
+        if (maximum < 0)
             return Theme.surfaceTextMedium
-        return m >= critPct ? Theme.error : m >= warnPct ? Theme.warning : Theme.surfaceText
+        return maximum >= critPct ? Theme.error
+             : maximum >= warnPct ? Theme.warning : Theme.surfaceText
     }
 
-    // Freshness for a provider, as a short right-aligned caption.
-    function freshness(p) {
-        if (p.live)
-            return "live"
-        const mins = minutesSince(p.capturedAt)
-        if (mins < 0)
-            return ""
-        if (mins <= 0)
-            return "just now"
-        return mins >= 60 ? Math.floor(mins / 60) + "h ago" : mins + "m ago"
+    component OverviewLimits: Column {
+        id: overviewLimits
+
+        required property string providerName
+        required property url providerIcon
+        required property color providerColor
+        required property var limits
+        property string plan: ""
+        property bool first: false
+
+        width: parent?.width ?? 0
+        spacing: Theme.spacingM
+
+        Rectangle {
+            width: parent.width
+            height: 1
+            visible: !first
+            color: Theme.outlineLight
+        }
+
+        Item {
+            width: parent.width
+            height: Math.max(Theme.fontSizeMedium + 3,
+                             overviewProviderTitle.implicitHeight)
+
+            Row {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Theme.spacingXS
+
+                DankSVGIcon {
+                    source: overviewLimits.providerIcon
+                    size: Theme.fontSizeMedium + 3
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                StyledText {
+                    id: overviewProviderTitle
+                    text: overviewLimits.providerName
+                    color: Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeMedium
+                    font.weight: Font.Bold
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                StyledText {
+                    text: overviewLimits.plan
+                    visible: text.length > 0
+                    color: Theme.surfaceTextMedium
+                    font.pixelSize: Theme.fontSizeSmall
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+
+            StyledText {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: "live"
+                color: Theme.surfaceTextMedium
+                font.pixelSize: Theme.fontSizeSmall
+            }
+        }
+
+        Column {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            Repeater {
+                model: overviewLimits.limits
+
+                delegate: Column {
+                    required property var modelData
+                    width: parent.width
+                    spacing: Theme.spacingXXS
+
+                    Item {
+                        width: parent.width
+                        height: limitName.implicitHeight
+
+                        StyledText {
+                            id: limitName
+                            anchors.left: parent.left
+                            text: modelData.label
+                            color: Theme.surfaceText
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+                        StyledText {
+                            anchors.right: parent.right
+                            text: modelData.pct + "% used"
+                            color: root.usageColor(modelData.pct)
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.weight: Font.Medium
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 5
+                        radius: height / 2
+                        color: Theme.surfaceVariant
+
+                        Rectangle {
+                            width: parent.width * Math.max(0, Math.min(1, modelData.pct / 100))
+                            height: parent.height
+                            radius: parent.radius
+                            color: root.usageColor(modelData.pct)
+
+                            Behavior on width {
+                                NumberAnimation { duration: Theme.shortDuration; easing.type: Easing.OutCubic }
+                            }
+                        }
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: resetText.implicitHeight
+
+                        StyledText {
+                            id: resetText
+                            readonly property int t: root.tick
+                            anchors.left: parent.left
+                            text: "Resets in " + root.countdown(modelData.resets_at)
+                            color: Theme.surfaceVariantText
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+                        StyledText {
+                            anchors.right: parent.right
+                            text: root.remaining(modelData.pct) + "% remaining"
+                            color: Theme.surfaceTextMedium
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pillRightClickAction: function () { root.refresh() }
 
-    // BasePill (which PluginComponent wraps these in) draws the background,
-    // applies the bar's widgetPadding and owns hover/ripple — it sizes itself
-    // from the content's implicit size, so the content is the icon alone.
     horizontalBarPill: Component {
         DankIcon {
             name: "speed"
@@ -112,169 +225,202 @@ PluginComponent {
         }
     }
 
-    popoutWidth: 340
-    popoutHeight: 0     // PluginPopout rebinds this to the content's implicit height
+    popoutWidth: 420
+    popoutHeight: 0
     popoutContent: Component {
         PopoutComponent {
             headerText: "AI Usage"
             showCloseButton: true
             closePopout: function () { root.closePopout() }
 
-            // Refresh lives in the header, so no hint line is needed below.
             headerActions: Component {
                 DankActionButton {
                     iconName: "refresh"
                     iconColor: Theme.surfaceTextMedium
-                    tooltipText: "Refresh now"
+                    tooltipText: "Refresh current view"
                     onClicked: root.refresh()
                 }
             }
 
             Column {
                 width: parent.width
-                spacing: Theme.spacingL
+                spacing: Theme.spacingM + 4
                 leftPadding: root.contentPadding
                 rightPadding: root.contentPadding
                 topPadding: Theme.spacingXS
                 bottomPadding: Theme.spacingXS
 
-                Repeater {
-                    model: root.providers()
+                DankTabBar {
+                    width: parent.width - root.contentPadding * 2
+                    height: 30
+                    tabHeight: 36
+                    spacing: Theme.spacingXXS
+                    currentIndex: root.currentTab
+                    showIcons: false
+                    equalWidthTabs: true
+                    enableArrowNavigation: true
+                    model: [
+                        {text: "Overview", icon: ""},
+                        {text: "Codex", icon: ""},
+                        {text: "Claude", icon: ""}
+                    ]
+                    onTabClicked: function (index) { root.currentTab = index }
+                }
 
-                    delegate: Column {
-                        required property var modelData
-                        required property int index
+                DankFlickable {
+                    id: pageFlick
+                    width: parent.width - root.contentPadding * 2
+                    readonly property real pageHeight:
+                        root.currentTab === 0
+                        ? overviewPage.implicitHeight
+                        : providerLoader.loadedHeight
+                    height: Math.min(pageHeight, 560)
+                    contentWidth: width
+                    contentHeight: pageHeight
+                    clip: contentHeight > height
 
-                        width: parent.width - root.contentPadding * 2
-                        spacing: Theme.spacingM
+                    onWidthChanged: contentX = 0
 
-                        // Hairline between providers, never above the first.
-                        Rectangle {
+                    Connections {
+                        target: root
+                        function onCurrentTabChanged() { pageFlick.contentY = 0 }
+                    }
+
+                    Column {
+                        id: overviewPage
+                        width: pageFlick.width
+                        visible: root.currentTab === 0
+                        spacing: Theme.spacingL
+                        topPadding: Theme.spacingS
+
+                        OverviewLimits {
                             width: parent.width
-                            height: 1
-                            visible: index > 0
-                            color: Theme.outlineLight
+                            visible: root.showCodexLimits
+                            first: true
+                            providerName: "Codex"
+                            providerIcon: Qt.resolvedUrl("assets/codex.svg")
+                            providerColor: Theme.tertiary
+                            plan: root.usageData?.codex?.plan ?? ""
+                            limits: root.codexLimits
                         }
 
-                        Item {
+                        OverviewLimits {
                             width: parent.width
-                            height: providerName.implicitHeight
-
-                            Row {
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: Theme.spacingXS
-
-                                DankSVGIcon {
-                                    source: modelData.icon
-                                    size: Theme.fontSizeMedium + 2
-                                    colorOverride: Theme.surfaceTextMedium
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                StyledText {
-                                    id: providerName
-                                    text: modelData.name
-                                    color: Theme.surfaceText
-                                    font.pixelSize: Theme.fontSizeMedium
-                                    font.weight: Font.Medium
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                                StyledText {
-                                    text: modelData.plan
-                                    visible: modelData.plan !== ""
-                                    color: Theme.surfaceTextMedium
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    anchors.verticalCenter: parent.verticalCenter
-                                }
-                            }
-
-                            StyledText {
-                                readonly property int t: root.tick
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: root.freshness(modelData)
-                                color: Theme.surfaceTextMedium
-                                font.pixelSize: Theme.fontSizeSmall
-                            }
+                            visible: root.showClaudeLimits
+                            first: !root.showCodexLimits
+                            providerName: "Claude"
+                            providerIcon: Qt.resolvedUrl("assets/claude.svg")
+                            providerColor: Theme.primary
+                            limits: root.claudeLimits
                         }
 
-                        Repeater {
-                            model: modelData.limits
-
-                            delegate: Column {
-                                required property var modelData
-
-                                width: parent.width
-                                spacing: Theme.spacingXXS
-
-                                Item {
-                                    width: parent.width
-                                    height: limitLabel.implicitHeight
-
-                                    StyledText {
-                                        id: limitLabel
-                                        anchors.left: parent.left
-                                        text: modelData.label
-                                        color: Theme.surfaceText
-                                        font.pixelSize: Theme.fontSizeSmall
-                                    }
-                                    StyledText {
-                                        anchors.right: parent.right
-                                        text: modelData.pct + "%"
-                                        color: root.usageColor(modelData.pct)
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        font.weight: Font.Medium
-                                    }
-                                }
-
-                                Rectangle {
-                                    width: parent.width
-                                    height: 5
-                                    radius: height / 2
-                                    color: Theme.surfaceVariant
-
-                                    Rectangle {
-                                        width: parent.width * Math.max(0, Math.min(1, modelData.pct / 100))
-                                        height: parent.height
-                                        radius: parent.radius
-                                        color: root.usageColor(modelData.pct)
-
-                                        Behavior on width {
-                                            NumberAnimation { duration: Theme.shortDuration; easing.type: Easing.OutCubic }
-                                        }
-                                    }
-                                }
-
-                                StyledText {
-                                    readonly property int t: root.tick   // re-evaluate each second
-                                    text: "resets in " + root.countdown(modelData.resets_at)
-                                    color: Theme.surfaceTextMedium
-                                    font.pixelSize: Theme.fontSizeSmall
-                                }
-                            }
+                        StyledText {
+                            width: parent.width
+                            visible: !root.hasData
+                            wrapMode: Text.WordWrap
+                            text: root.fetchFailed
+                                ? "No live limits found. Sign in to Claude Code or Codex."
+                                : "Loading live limits…"
+                            color: Theme.surfaceVariantText
+                            font.pixelSize: Theme.fontSizeSmall
                         }
+
+                        StyledText {
+                            width: parent.width
+                            visible: root.hasData && root.visibleProviderCount === 0
+                            wrapMode: Text.WordWrap
+                            text: "Both providers are hidden — enable one in plugin settings."
+                            color: Theme.surfaceVariantText
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+                    }
+
+                    Loader {
+                        id: providerLoader
+                        width: pageFlick.width
+                        readonly property real loadedHeight:
+                            item ? item.preferredHeight : 0
+                        height: loadedHeight
+                        active: root.currentTab !== 0
+                        visible: active
+                        source: Qt.resolvedUrl("UsageProviderPage.qml")
+                    }
+
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "providerKey"
+                        value: root.activeProvider
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "providerName"
+                        value: root.activeProvider === "claude" ? "Claude" : "Codex"
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "providerIcon"
+                        value: Qt.resolvedUrl(root.activeProvider === "claude"
+                                              ? "assets/claude.svg" : "assets/codex.svg")
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "providerColor"
+                        value: root.activeProvider === "claude" ? Theme.primary : Theme.tertiary
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "plan"
+                        value: root.activeProvider === "codex"
+                               ? (root.usageData?.codex?.plan ?? "") : ""
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "limits"
+                        value: root.activeProvider === "claude"
+                               ? root.claudeLimits : root.codexLimits
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "history"
+                        value: root.usageData
+                               ? root.usageData.historyFor(root.activeProvider) : null
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "historyLoading"
+                        value: root.usageData
+                               ? root.usageData.historyLoading(root.activeProvider) : false
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "historyFailed"
+                        value: root.usageData
+                               ? root.usageData.historyFailed(root.activeProvider) : false
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "historyStale"
+                        value: root.usageData
+                               ? root.usageData.historyStale(root.activeProvider) : false
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "now"
+                        value: root.usageData?.now ?? Math.floor(Date.now() / 1000)
                     }
                 }
 
-                StyledText {
-                    width: parent.width - root.contentPadding * 2
-                    visible: !root.hasData
-                    wrapMode: Text.WordWrap
-                    text: root.fetchFailed
-                        ? "No usage found. Sign in to Claude Code (`claude` then `/login`) or run Codex at least once."
-                        : "Loading usage…"
-                    color: Theme.surfaceVariantText
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-
-                StyledText {
-                    width: parent.width - root.contentPadding * 2
-                    visible: root.hasData && root.providers().length === 0
-                    wrapMode: Text.WordWrap
-                    text: "Both providers are hidden — enable one in plugin settings."
-                    color: Theme.surfaceVariantText
-                    font.pixelSize: Theme.fontSizeSmall
-                }
             }
         }
     }

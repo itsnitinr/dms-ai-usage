@@ -1,5 +1,4 @@
-// Runs fetch-usage.sh on a timer and exposes the parsed result. The script owns
-// the cache file; we watch it so every bar instance picks up one fetch.
+// Owns live limit data plus lazy, provider-specific local analytics caches.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -8,22 +7,32 @@ import qs.Common
 Item {
     id: root
 
-    // --- outputs ---
-    property var claude: null           // {captured_at, limits:[{label,pct,resets_at}]} or null
-    property var codex: null            // {captured_at, plan, limits:[...]} or null
+    property var claude: null
+    property var codex: null
     property int capturedAt: 0
-    property bool fetchFailed: false    // last run reported no provider at all
-    property int now: Math.floor(Date.now() / 1000)   // ticks every second
+    property bool fetchFailed: false
+    property int now: Math.floor(Date.now() / 1000)
+
+    // Empty on Overview. Selecting a provider tab starts only that provider's
+    // local log scan; the 5-minute timer then refreshes only the active tab.
+    property string activeProvider: ""
+    property var claudeHistory: null
+    property var codexHistory: null
+    property bool claudeHistoryLoading: false
+    property bool codexHistoryLoading: false
+    property bool claudeHistoryFailed: false
+    property bool codexHistoryFailed: false
 
     readonly property bool hasData: claude !== null || codex !== null
-
     readonly property int refreshSeconds: 300
     readonly property string scriptPath: Qt.resolvedUrl("fetch-usage.sh").toString().replace("file://", "")
-    readonly property string cachePath:
+    readonly property string historyPath: Qt.resolvedUrl("fetch-history.sh").toString().replace("file://", "")
+    readonly property string cacheDir:
         (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache"))
-        + "/dms-ai-usage.json"
+    readonly property string cachePath: cacheDir + "/dms-ai-usage.json"
+    readonly property string claudeHistoryPath: cacheDir + "/dms-ai-usage-claude-history.json"
+    readonly property string codexHistoryPath: cacheDir + "/dms-ai-usage-codex-history.json"
 
-    // Human countdown to a reset epoch: "5d 14h", "3h 12m", "8m".
     function countdown(reset) {
         const s = reset - now
         if (!reset || s <= 0)
@@ -38,18 +47,70 @@ Item {
         return Math.max(1, m) + "m"
     }
 
-    // Minutes since an epoch, or -1 when there is nothing to age.
     function minutesSince(ts) {
         return ts ? Math.max(0, Math.floor((now - ts) / 60)) : -1
     }
 
-    function refresh() {
-        Proc.runCommand("aiUsage.fetch", ["sh", scriptPath], function (stdout, exitCode) {
-            root.fetchFailed = (exitCode !== 0)
-        }, 100)
+    function historyFor(provider) {
+        return provider === "claude" ? claudeHistory : codexHistory
     }
 
-    Component.onCompleted: refresh()
+    function historyLoading(provider) {
+        return provider === "claude" ? claudeHistoryLoading : codexHistoryLoading
+    }
+
+    function historyFailed(provider) {
+        return provider === "claude" ? claudeHistoryFailed : codexHistoryFailed
+    }
+
+    function historyStale(provider) {
+        const history = historyFor(provider)
+        return history !== null && now - (history.captured_at || 0) > refreshSeconds * 2
+    }
+
+    function refreshLimits() {
+        Proc.runCommand("aiUsage.fetch", ["sh", scriptPath], function (stdout, exitCode) {
+            root.fetchFailed = (exitCode !== 0)
+        }, 100, 20000)
+    }
+
+    function refreshHistory(provider) {
+        if (provider !== "claude" && provider !== "codex")
+            return
+
+        if (provider === "claude") {
+            claudeHistoryLoading = true
+            claudeHistoryFailed = false
+        } else {
+            codexHistoryLoading = true
+            codexHistoryFailed = false
+        }
+
+        Proc.runCommand("aiUsage.history." + provider,
+                        ["sh", historyPath, provider],
+                        function (stdout, exitCode) {
+            if (provider === "claude") {
+                root.claudeHistoryLoading = false
+                root.claudeHistoryFailed = (exitCode !== 0)
+            } else {
+                root.codexHistoryLoading = false
+                root.codexHistoryFailed = (exitCode !== 0)
+            }
+        }, 100, 30000)
+    }
+
+    function refresh() {
+        refreshLimits()
+        if (activeProvider !== "")
+            refreshHistory(activeProvider)
+    }
+
+    onActiveProviderChanged: {
+        if (activeProvider !== "")
+            refreshHistory(activeProvider)
+    }
+
+    Component.onCompleted: refreshLimits()
 
     Timer {
         interval: root.refreshSeconds * 1000
@@ -77,7 +138,45 @@ Item {
                 root.claude = o.claude || null
                 root.codex = o.codex || null
             } catch (e) {
-                console.warn("aiUsage: bad cache:", e)
+                console.warn("aiUsage: bad limits cache:", e)
+            }
+        }
+        onFileChanged: reload()
+    }
+
+    FileView {
+        id: claudeHistoryFile
+        path: root.claudeHistoryPath
+        watchChanges: true
+
+        onLoaded: {
+            try {
+                const o = JSON.parse(claudeHistoryFile.text())
+                if (o.provider !== "claude" || !Array.isArray(o.hourly)
+                        || !Array.isArray(o.daily) || !Array.isArray(o.models))
+                    throw new Error("unexpected Claude history schema")
+                root.claudeHistory = o
+            } catch (e) {
+                console.warn("aiUsage: bad Claude history cache:", e)
+            }
+        }
+        onFileChanged: reload()
+    }
+
+    FileView {
+        id: codexHistoryFile
+        path: root.codexHistoryPath
+        watchChanges: true
+
+        onLoaded: {
+            try {
+                const o = JSON.parse(codexHistoryFile.text())
+                if (o.provider !== "codex" || !Array.isArray(o.hourly)
+                        || !Array.isArray(o.daily) || !Array.isArray(o.models))
+                    throw new Error("unexpected Codex history schema")
+                root.codexHistory = o
+            } catch (e) {
+                console.warn("aiUsage: bad Codex history cache:", e)
             }
         }
         onFileChanged: reload()
