@@ -47,6 +47,12 @@ Item {
         return Math.max(1, m) + "m"
     }
 
+    // A window that has not been opened yet has no reset time; saying it resets
+    // "now" would read as if it had just rolled over.
+    function resetLabel(reset) {
+        return reset ? "Resets in " + countdown(reset) : "Window not started"
+    }
+
     function minutesSince(ts) {
         return ts ? Math.max(0, Math.floor((now - ts) / 60)) : -1
     }

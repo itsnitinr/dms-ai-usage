@@ -39,6 +39,7 @@ PluginComponent {
     readonly property int tick: usageData?.now ?? Math.floor(Date.now() / 1000)
 
     function countdown(reset) { return usageData ? usageData.countdown(reset) : "" }
+    function resetLabel(reset) { return usageData ? usageData.resetLabel(reset) : "" }
     function minutesSince(ts) { return usageData ? usageData.minutesSince(ts) : -1 }
     function refresh() { if (usageData) usageData.refresh() }
 
@@ -192,7 +193,7 @@ PluginComponent {
                             id: resetText
                             readonly property int t: root.tick
                             anchors.left: parent.left
-                            text: "Resets in " + root.countdown(modelData.resets_at)
+                            text: root.resetLabel(modelData.resets_at)
                             color: Theme.surfaceVariantText
                             font.pixelSize: Theme.fontSizeSmall
                         }

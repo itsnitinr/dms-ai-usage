@@ -60,10 +60,13 @@ claude_version() {
 }
 
 # Shared jq helpers: ISO-8601 (with optional fraction/zone) -> epoch seconds.
+# A bucket whose window has not started yet reports resets_at: null, so null
+# passes straight through rather than aborting the whole conversion.
 JQ_LIB='
 def epoch(s):
-  s | sub("\\.[0-9]+"; "") | sub("(Z|[+-][0-9]{2}:?[0-9]{2})$"; "")
-    | strptime("%Y-%m-%dT%H:%M:%S") | mktime;
+  if s == null then null
+  else s | sub("\\.[0-9]+"; "") | sub("(Z|[+-][0-9]{2}:?[0-9]{2})$"; "")
+         | strptime("%Y-%m-%dT%H:%M:%S") | mktime end;
 '
 
 # Several bars/monitors can run this at once; serve a recent cache instead of

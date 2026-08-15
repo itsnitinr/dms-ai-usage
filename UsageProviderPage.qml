@@ -73,6 +73,10 @@ Column {
         return Math.max(1, minutes) + "m"
     }
 
+    function resetLabel(reset) {
+        return reset ? "Resets in " + countdown(reset) : "Window not started"
+    }
+
     function dayLabel(epoch, index) {
         if (index === daily.length - 1)
             return "Today"
@@ -221,7 +225,7 @@ Column {
                     StyledText {
                         id: resetText
                         anchors.left: parent.left
-                        text: "Resets in " + root.countdown(modelData.resets_at)
+                        text: root.resetLabel(modelData.resets_at)
                         color: Theme.surfaceVariantText
                         font.pixelSize: Theme.fontSizeSmall
                     }
