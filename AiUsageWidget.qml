@@ -303,6 +303,30 @@ PluginComponent {
                         function onCurrentTabChanged() { pageFlick.contentY = 0 }
                     }
 
+                    // DMS draws a 6px pill in a 10px column at full opacity in
+                    // Theme.outline, which is louder than anything else in this
+                    // popout. The pill is DankScrollbar's contentItem and gets
+                    // its width from the control minus padding, so the only way
+                    // to reach either from out here is a Binding. Padding does
+                    // the thinning rather than implicitWidth so the bar keeps a
+                    // 10px grab area to drag.
+                    Binding {
+                        target: pageFlick.verticalScrollBar
+                        property: "padding"
+                        value: 3
+                    }
+                    Binding {
+                        target: pageFlick.verticalScrollBar.contentItem
+                        property: "color"
+                        value: pageFlick.verticalScrollBar.pressed
+                               ? Theme.outline : Theme.outlineMedium
+                    }
+                    Binding {
+                        target: pageFlick.verticalScrollBar.contentItem
+                        property: "opacity"
+                        value: pageFlick.verticalScrollBar.pressed ? 0.9 : 0.45
+                    }
+
                     Column {
                         id: overviewPage
                         width: pageFlick.width
