@@ -10,11 +10,16 @@ Item {
     property var claude: null
     property var codex: null
     property int capturedAt: 0
-    property bool fetchFailed: false
+    // Separates "no limits yet" from "asked, and there are none". Without it an
+    // empty result reads as a spinner that never finishes.
+    property bool fetchedOnce: false
     property int now: Math.floor(Date.now() / 1000)
+    // Attempt time, not success time: an offline retry must still push this
+    // forward, or the staleness check below would refire every second.
+    property int lastFetchAt: 0
 
     // Empty on Overview. Selecting a provider tab starts only that provider's
-    // local log scan; the 5-minute timer then refreshes only the active tab.
+    // local log scan; the periodic refresh then covers only the active tab.
     property string activeProvider: ""
     property var claudeHistory: null
     property var codexHistory: null
@@ -75,8 +80,9 @@ Item {
     }
 
     function refreshLimits() {
-        Proc.runCommand("aiUsage.fetch", ["sh", scriptPath], function (stdout, exitCode) {
-            root.fetchFailed = (exitCode !== 0)
+        lastFetchAt = now
+        Proc.runCommand("aiUsage.fetch", ["sh", scriptPath], function () {
+            root.fetchedOnce = true
         }, 100, 20000)
     }
 
@@ -130,18 +136,23 @@ Item {
 
     Component.onCompleted: refreshLimits()
 
-    Timer {
-        interval: root.refreshSeconds * 1000
-        running: true
-        repeat: true
-        onTriggered: root.refresh()
-    }
-
+    // Refreshes hang off the one-second tick rather than a refreshSeconds Timer
+    // because Qt timers run on a monotonic clock that stops while the machine is
+    // suspended: a plain Timer resumes counting where it left off instead of
+    // firing, so a laptop woken from sleep sits on stale limits for minutes.
+    // Wall-clock elapsed time is the honest measure, and it also catches up
+    // immediately on resume. A backwards clock jump (elapsed < 0) refreshes once
+    // and re-bases lastFetchAt.
     Timer {
         interval: 1000
         running: true
         repeat: true
-        onTriggered: root.now = Math.floor(Date.now() / 1000)
+        onTriggered: {
+            root.now = Math.floor(Date.now() / 1000)
+            const elapsed = root.now - root.lastFetchAt
+            if (elapsed >= root.refreshSeconds || elapsed < 0)
+                root.refresh()
+        }
     }
 
     FileView {

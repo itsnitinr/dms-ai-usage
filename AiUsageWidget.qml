@@ -24,7 +24,7 @@ PluginComponent {
     // previously cached AiUsageData component URL.
     Loader {
         id: dataLoader
-        source: Qt.resolvedUrl("AiUsageData.qml?dashboard=2")
+        source: Qt.resolvedUrl("AiUsageData.qml?dashboard=3")
     }
     readonly property var usageData: dataLoader.item
     Binding {
@@ -35,7 +35,7 @@ PluginComponent {
     }
 
     readonly property bool hasData: usageData?.hasData ?? false
-    readonly property bool fetchFailed: usageData?.fetchFailed ?? false
+    readonly property bool fetchedOnce: usageData?.fetchedOnce ?? false
     readonly property int tick: usageData?.now ?? Math.floor(Date.now() / 1000)
 
     function countdown(reset) { return usageData ? usageData.countdown(reset) : "" }
@@ -335,7 +335,7 @@ PluginComponent {
                             width: parent.width
                             visible: !root.hasData
                             wrapMode: Text.WordWrap
-                            text: root.fetchFailed
+                            text: root.fetchedOnce
                                 ? "No live limits found. Sign in to Claude Code or Codex."
                                 : "Loading live limits…"
                             color: Theme.surfaceVariantText

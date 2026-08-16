@@ -19,7 +19,10 @@
 #   CODEX_TIMEOUT   app-server response timeout in seconds (default 12)
 #   MIN_AGE         seconds before a cached result is refetched (default 150)
 #
-# Exit: 0 if at least one provider reported, 1 if neither did.
+# Exit: 0 if at least one provider reported, 1 if neither did. A run where
+#       neither reported leaves the cache untouched, so a transient failure —
+#       no network yet after a resume from sleep, say — does not erase the last
+#       good snapshot out from under whatever is displaying it.
 set -u
 
 cache="${CACHE_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/dms-ai-usage.json}"
@@ -76,6 +79,10 @@ if [ -s "$cache" ]; then
   case "$prev" in ''|*[!0-9]*) prev=0 ;; esac
   if [ "$prev" -gt 0 ] && [ $((now - prev)) -lt "$min_age" ]; then
     cat "$cache"
+    # A snapshot with no providers in it is a cached *failure*. Still serve it
+    # rather than re-hitting the network, but report it as one: exiting 0 here
+    # would tell the caller the fetch succeeded and simply found nothing.
+    jq -e '.claude != null or .codex != null' "$cache" >/dev/null 2>&1 || exit 1
     exit 0
   fi
 fi
@@ -143,12 +150,18 @@ codex_usage() {
 c=$(claude_usage); [ -n "$c" ] || c=null
 x=$(codex_usage);  [ -n "$x" ] || x=null
 
+# Neither provider answered. Keep the previous snapshot — stale limits beat no
+# limits — and hand the stale payload back so a caller reading stdout still has
+# something to show.
+if [ "$c" = null ] && [ "$x" = null ]; then
+  [ -s "$cache" ] && cat "$cache"
+  exit 1
+fi
+
 out=$(jq -n --argjson now "$now" --argjson claude "$c" --argjson codex "$x" \
   '{captured_at: $now, claude: $claude, codex: $codex}') || exit 1
 
 tmp="$cache.tmp.$$"
 printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
 printf '%s' "$out"
-
-[ "$c" = null ] && [ "$x" = null ] && exit 1
 exit 0
