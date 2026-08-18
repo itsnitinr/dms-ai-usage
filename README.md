@@ -20,7 +20,7 @@ provider keeps its previous numbers and the marker becomes their age (`7m ago`)
 rather than the row disappearing. After an hour with no successful fetch the
 provider drops out entirely.
 
-The bar shows a single `auto_awesome` icon, tinted by the highest utilization across
+The bar shows a single `insights` icon, tinted by the highest utilization across
 everything enabled: normal text color under 70%, amber at 70%, red at 90%. It
 stays quiet until something needs attention.
 

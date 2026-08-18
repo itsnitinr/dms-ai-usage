@@ -215,7 +215,7 @@ PluginComponent {
 
     horizontalBarPill: Component {
         DankIcon {
-            name: "auto_awesome"
+            name: "insights"
             size: root.iconSize
             color: root.pillColor()
         }
@@ -223,7 +223,7 @@ PluginComponent {
 
     verticalBarPill: Component {
         DankIcon {
-            name: "auto_awesome"
+            name: "insights"
             size: root.iconSize
             color: root.pillColor()
         }
