@@ -29,7 +29,11 @@ Item {
     property bool codexHistoryFailed: false
 
     readonly property bool hasData: claude !== null || codex !== null
-    readonly property int refreshSeconds: 300
+    // Claude's usage endpoint allows roughly two requests per five minutes and
+    // answers a 429 with retry-after: 291. Polling every five minutes sat right
+    // on that edge, so any Claude Code session running alongside the bar pushed
+    // the poll over it; six minutes leaves the budget room for both.
+    readonly property int refreshSeconds: 360
     readonly property string scriptPath: Qt.resolvedUrl("fetch-usage.sh").toString().replace("file://", "")
     readonly property string historyPath: Qt.resolvedUrl("fetch-history.sh").toString().replace("file://", "")
     readonly property string cacheDir:
@@ -60,6 +64,21 @@ Item {
 
     function minutesSince(ts) {
         return ts ? Math.max(0, Math.floor((now - ts) / 60)) : -1
+    }
+
+    // A provider whose entry predates the snapshot holding it was carried
+    // forward from an earlier fetch because this one failed — see the tail of
+    // fetch-usage.sh. Labelling those numbers "live" is the one thing this
+    // widget must not do, so say how old they actually are instead. Comparing
+    // against the snapshot rather than against wall-clock time keeps a healthy
+    // provider reading "live" for the whole refresh interval.
+    function freshness(snapshot) {
+        if (!snapshot)
+            return "unavailable"
+        const ts = snapshot.captured_at || 0
+        if (ts <= 0 || ts >= capturedAt)
+            return "live"
+        return Math.max(1, minutesSince(ts)) + "m ago"
     }
 
     function historyFor(provider) {

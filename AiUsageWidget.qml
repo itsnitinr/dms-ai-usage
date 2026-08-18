@@ -41,6 +41,7 @@ PluginComponent {
     function countdown(reset) { return usageData ? usageData.countdown(reset) : "" }
     function resetLabel(reset) { return usageData ? usageData.resetLabel(reset) : "" }
     function minutesSince(ts) { return usageData ? usageData.minutesSince(ts) : -1 }
+    function freshness(snapshot) { return usageData ? usageData.freshness(snapshot) : "" }
     function refresh() { if (usageData) usageData.refresh() }
 
     readonly property var codexLimits: usageData?.codex?.limits ?? []
@@ -82,6 +83,7 @@ PluginComponent {
         required property color providerColor
         required property var limits
         property string plan: ""
+        property string freshness: "live"
         property bool first: false
 
         width: parent?.width ?? 0
@@ -129,7 +131,7 @@ PluginComponent {
             StyledText {
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: "live"
+                text: overviewLimits.freshness
                 color: Theme.surfaceTextMedium
                 font.pixelSize: Theme.fontSizeSmall
             }
@@ -342,6 +344,7 @@ PluginComponent {
                             providerIcon: Qt.resolvedUrl("assets/codex.svg")
                             providerColor: Theme.tertiary
                             plan: root.usageData?.codex?.plan ?? ""
+                            freshness: root.freshness(root.usageData?.codex)
                             limits: root.codexLimits
                         }
 
@@ -352,6 +355,7 @@ PluginComponent {
                             providerName: "Claude"
                             providerIcon: Qt.resolvedUrl("assets/claude.svg")
                             providerColor: Theme.primary
+                            freshness: root.freshness(root.usageData?.claude)
                             limits: root.claudeLimits
                         }
 
@@ -418,6 +422,14 @@ PluginComponent {
                         property: "plan"
                         value: root.activeProvider === "codex"
                                ? (root.usageData?.codex?.plan ?? "") : ""
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "freshness"
+                        value: root.freshness(root.activeProvider === "claude"
+                                              ? root.usageData?.claude
+                                              : root.usageData?.codex)
                     }
                     Binding {
                         target: providerLoader.item

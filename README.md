@@ -12,8 +12,13 @@ Claude Code and Codex subscription limits in the DankBar.
 
 | Provider | Limits | Freshness |
 | --- | --- | --- |
-| Claude | 5-hour, weekly | Live — queried on a 5 minute timer |
-| Codex | whatever windows your plan has (weekly on Plus) | Live — queried on a 5 minute timer |
+| Claude | 5-hour, weekly | Live — queried on a 6 minute timer |
+| Codex | whatever windows your plan has (weekly on Plus) | Live — queried on a 6 minute timer |
+
+Each provider carries a `live` marker in the popout. When a fetch fails, that
+provider keeps its previous numbers and the marker becomes their age (`7m ago`)
+rather than the row disappearing. After an hour with no successful fetch the
+provider drops out entirely.
 
 The bar shows a single `auto_awesome` icon, tinted by the highest utilization across
 everything enabled: normal text color under 70%, amber at 70%, red at 90%. It
@@ -29,7 +34,7 @@ Left-click for a three-tab detail popout:
 
 Provider analytics are lazy: opening Overview never scans session logs. The
 first visit to Codex or Claude builds only that provider's cache, after which
-the active tab refreshes every five minutes. Refresh from the header button, or
+the active tab refreshes on the same timer. Refresh from the header button, or
 right-click the pill.
 
 Analytics count local session tokens, while the meters are subscription limits
@@ -45,7 +50,11 @@ monitors share a single fetch.
 **Claude** — reads the OAuth access token Claude Code already stores in
 `~/.claude/.credentials.json` and calls `api.anthropic.com/api/oauth/usage`
 with it, the same endpoint the client uses for `/usage`. The token goes
-nowhere else. If it 401s (signed out), the provider is simply omitted.
+nowhere else. If it 401s (signed out), the provider is eventually omitted.
+
+That endpoint allows only about two requests per five minutes, and Claude Code
+itself draws on the same budget, so a poll returning 429 is routine — hence the
+6 minute timer and the carry-forward above.
 
 **Codex limits** — starts the local Codex App Server and calls its supported
 `account/rateLimits/read` JSON-RPC method. The response includes the live usage

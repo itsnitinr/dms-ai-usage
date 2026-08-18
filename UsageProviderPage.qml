@@ -11,6 +11,7 @@ Column {
     property url providerIcon: ""
     property color providerColor: Theme.primary
     property string plan: ""
+    property string freshness: "live"
     property var limits: []
     property var history: null
     property bool historyLoading: false
@@ -160,7 +161,7 @@ Column {
         StyledText {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.limits.length > 0 ? "live" : "unavailable"
+            text: root.limits.length > 0 ? root.freshness : "unavailable"
             color: Theme.surfaceTextMedium
             font.pixelSize: Theme.fontSizeSmall
         }

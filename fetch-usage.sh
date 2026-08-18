@@ -3,7 +3,9 @@
 # write it to the cache, and print it.
 #
 # Claude: reads the OAuth access token Claude Code already keeps on disk and asks
-# the same usage endpoint the client itself uses. Live, always current.
+# the same usage endpoint the client itself uses. That endpoint allows only about
+# two requests per five minutes, and Claude Code itself spends from the same
+# budget, so a poll landing on a 429 is routine rather than exceptional.
 #
 # Codex: asks the local Codex app-server for the account's current ChatGPT
 # rate-limit buckets. This is live and does not inspect session rollout logs.
@@ -18,16 +20,20 @@
 #   CODEX_CMD       Codex executable (default codex)
 #   CODEX_TIMEOUT   app-server response timeout in seconds (default 12)
 #   MIN_AGE         seconds before a cached result is refetched (default 150)
+#   MAX_STALE       seconds a failed provider keeps its previous entry (default 3600)
 #
 # Exit: 0 if at least one provider reported, 1 if neither did. A run where
 #       neither reported leaves the cache untouched, so a transient failure —
 #       no network yet after a resume from sleep, say — does not erase the last
-#       good snapshot out from under whatever is displaying it.
+#       good snapshot out from under whatever is displaying it. The same holds
+#       one provider at a time: a provider that failed keeps its previous entry,
+#       stale captured_at and all, rather than being written down as null.
 set -u
 
 cache="${CACHE_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/dms-ai-usage.json}"
 claude_creds="${CLAUDE_CREDS:-$HOME/.claude/.credentials.json}"
 min_age="${MIN_AGE:-150}"
+max_stale="${MAX_STALE:-3600}"
 now=$(date +%s)
 script_dir=$(CDPATH= cd -P "$(dirname "$0")" 2>/dev/null && pwd)
 
@@ -152,11 +158,35 @@ x=$(codex_usage);  [ -n "$x" ] || x=null
 
 # Neither provider answered. Keep the previous snapshot — stale limits beat no
 # limits — and hand the stale payload back so a caller reading stdout still has
-# something to show.
+# something to show. captured_at deliberately stays where it was, so the next
+# run retries immediately instead of sitting out the min_age window.
 if [ "$c" = null ] && [ "$x" = null ]; then
   [ -s "$cache" ] && cat "$cache"
   exit 1
 fi
+
+# One provider answered and the other did not, which is the common case rather
+# than a rare one: Codex is served by a local app-server and effectively always
+# answers, while Claude's endpoint hands back a 429 whenever a Claude Code
+# session has recently spent the shared budget. Carrying the last good entry
+# forward per provider keeps that routine 429 from blanking Claude out of a
+# snapshot Codex is keeping alive — which reads, wrongly, as Claude not being
+# installed. The carried entry keeps its own older captured_at so a reader can
+# still tell it apart from a fresh one.
+#
+# Carrying forward stops at max_stale. Rate-limit windows are minutes long, so a
+# provider silent for an hour is not being throttled — it is signed out or gone,
+# and hour-old percentages would be a worse answer than admitting there are
+# none. This is what lets the empty state eventually appear again.
+prev_entry() {
+  [ -s "$cache" ] || { echo null; return; }
+  jq -c --arg key "$1" --argjson now "$now" --argjson max "$max_stale" \
+    '.[$key] // null | select(. != null and $now - (.captured_at // 0) <= $max) // null' \
+    "$cache" 2>/dev/null || echo null
+}
+
+if [ "$c" = null ]; then c=$(prev_entry claude); [ -n "$c" ] || c=null; fi
+if [ "$x" = null ]; then x=$(prev_entry codex);  [ -n "$x" ] || x=null; fi
 
 out=$(jq -n --argjson now "$now" --argjson claude "$c" --argjson codex "$x" \
   '{captured_at: $now, claude: $claude, codex: $codex}') || exit 1
