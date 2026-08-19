@@ -36,6 +36,15 @@ PluginComponent {
 
     readonly property bool hasData: usageData?.hasData ?? false
     readonly property bool fetchedOnce: usageData?.fetchedOnce ?? false
+
+    // A machine that has never signed into either CLI has nothing to say, and a
+    // permanently dimmed icon says it badly. Collapse out of the bar instead,
+    // and come back on the first fetch that finds something. Staying put until
+    // that first fetch completes avoids flashing the pill away on every shell
+    // start. fetch-usage.sh carries a failed provider forward for an hour, so
+    // this waits out a transient outage rather than reacting to one.
+    readonly property bool nothingToShow: fetchedOnce && !hasData
+    onNothingToShowChanged: setVisibilityOverride(!nothingToShow)
     readonly property int tick: usageData?.now ?? Math.floor(Date.now() / 1000)
 
     function countdown(reset) { return usageData ? usageData.countdown(reset) : "" }
