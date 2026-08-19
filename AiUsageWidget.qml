@@ -20,11 +20,18 @@ PluginComponent {
         currentTab === 1 ? "codex" : currentTab === 2 ? "claude" : ""
 
     // URL loading bypasses Qt's cached same-directory type table during an
-    // in-place plugin upgrade. The query also separates this revision from a
-    // previously cached AiUsageData component URL.
+    // in-place plugin upgrade. It does not, on its own, survive one: the engine
+    // caches compiled components by URL, and PluginService busts that cache only
+    // on the plugin's own surface URLs (a `?t=` it appends in loadPlugin), so a
+    // nested URL load keeps serving the copy compiled before the edit. This root
+    // is rebuilt once per load, which makes a timestamp captured here a fresh
+    // token exactly once per `plugins reload` — every file below is recompiled,
+    // with no per-file revision constant to remember to bump.
+    readonly property string reloadToken: "?r=" + Date.now()
+
     Loader {
         id: dataLoader
-        source: Qt.resolvedUrl("AiUsageData.qml?dashboard=3")
+        source: Qt.resolvedUrl("AiUsageData.qml" + root.reloadToken)
     }
     readonly property var usageData: dataLoader.item
     Binding {
@@ -397,9 +404,15 @@ PluginComponent {
                         height: loadedHeight
                         active: root.currentTab !== 0
                         visible: active
-                        source: Qt.resolvedUrl("UsageProviderPage.qml")
+                        source: Qt.resolvedUrl("UsageProviderPage.qml" + root.reloadToken)
                     }
 
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "reloadToken"
+                        value: root.reloadToken
+                    }
                     Binding {
                         target: providerLoader.item
                         when: providerLoader.item !== null

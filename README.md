@@ -151,7 +151,21 @@ compile, the whole plugin drops out of the bar rather than just losing the new
 part. Neither `plugin-scan rescan` nor `plugins reload` clears it; only a shell
 restart does.
 
-`UsageProviderPage.qml` and `UsageGraph.qml` are loaded by URL so the main
-widget can still compile if an optional page fails. A shell restart is still
-required once when these files are first added; after the engine has registered
-them, ordinary edits and plugin reloads work normally.
+`AiUsageData.qml`, `UsageProviderPage.qml` and `UsageGraph.qml` are loaded by
+URL so the main widget can still compile if an optional page fails. A shell
+restart is still required once when these files are first added.
+
+### Why the loader URLs carry a `?r=` query
+
+`plugins reload` on its own does not pick up an edit to a URL-loaded file. Qt
+caches compiled components by URL, and `PluginService.loadPlugin` busts that
+cache only on the plugin's own surface URLs — it appends a `?t=` to
+`AiUsageWidget.qml` and to nothing else. A nested
+`Qt.resolvedUrl("UsageProviderPage.qml")` therefore keeps serving the copy
+compiled before the edit, and does it silently: the reload reports success while
+the old code keeps running.
+
+`AiUsageWidget.qml` mints a `reloadToken` once per load and appends it to every
+nested loader URL, passing it down to `UsageProviderPage.qml` for the graph. So
+edit any of these files and a plain `plugins reload` is enough. Anything added
+later that loads a sibling by URL needs the token too.

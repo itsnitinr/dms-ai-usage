@@ -18,6 +18,9 @@ Column {
     property bool historyFailed: false
     property bool historyStale: false
     property int now: Math.floor(Date.now() / 1000)
+    // Passed down rather than minted here so the graph is recompiled once per
+    // plugin reload, not once per page instantiation. See AiUsageWidget.qml.
+    property string reloadToken: ""
 
     readonly property var hourly: history?.hourly ?? []
     readonly property var daily: history?.daily ?? []
@@ -306,7 +309,7 @@ Column {
         Loader {
             id: hourlyLoader
             width: parent.width
-            source: Qt.resolvedUrl("UsageGraph.qml")
+            source: Qt.resolvedUrl("UsageGraph.qml" + root.reloadToken)
         }
         Binding {
             target: hourlyLoader.item
