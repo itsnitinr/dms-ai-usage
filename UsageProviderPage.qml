@@ -78,8 +78,23 @@ Column {
         return reset ? "Resets in " + countdown(reset) : "Window not started"
     }
 
-    function dayLabel(epoch, index) {
-        if (index === daily.length - 1)
+    // Local midnight, recomputed from the tick so a popout left open across
+    // midnight moves the "Today" row with the clock instead of leaving it on
+    // yesterday's bar until the next history scan lands.
+    readonly property int todayStart: {
+        const day = new Date(now * 1000)
+        day.setHours(0, 0, 0, 0)
+        return Math.floor(day.getTime() / 1000)
+    }
+
+    // By date rather than by position: the last bucket is only today for as
+    // long as the scan that produced it is current.
+    function isToday(epoch) {
+        return epoch === todayStart
+    }
+
+    function dayLabel(epoch) {
+        if (isToday(epoch))
             return "Today"
         return new Date(epoch * 1000).toLocaleDateString(Qt.locale(), "ddd")
     }
@@ -334,7 +349,7 @@ Column {
 
                 delegate: Item {
                     required property var modelData
-                    required property int index
+                    readonly property bool today: root.isToday(modelData.start)
                     width: parent.width
                     height: 24
 
@@ -343,10 +358,10 @@ Column {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     width: 48
-                    text: root.dayLabel(modelData.start, index)
-                    color: index === root.daily.length - 1 ? Theme.surfaceText : Theme.surfaceTextMedium
+                    text: root.dayLabel(modelData.start)
+                    color: today ? Theme.surfaceText : Theme.surfaceTextMedium
                     font.pixelSize: Theme.fontSizeSmall
-                    font.weight: index === root.daily.length - 1 ? Font.Bold : Font.Normal
+                    font.weight: today ? Font.Bold : Font.Normal
                 }
                 StyledText {
                     id: dayValue
