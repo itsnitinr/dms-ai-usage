@@ -84,21 +84,49 @@ Column {
         return new Date(epoch * 1000).toLocaleDateString(Qt.locale(), "ddd")
     }
 
+    // Model ids arrive hyphenated with the version split across segments
+    // (`claude-sonnet-4-5-20250929`, `gpt-5-codex`), so a plain title-case of
+    // every segment renders "Claude Sonnet 4 5 20250929". Rejoin the numeric
+    // run into one version instead and title-case the words around it. The
+    // trailing eight-digit date is a build stamp rather than part of the name,
+    // and the `claude-` prefix only repeats the provider heading above.
     function modelLabel(value) {
         if (!value || value === "Unknown")
             return "Unknown model"
-        if (value.indexOf("gpt-") === 0) {
-            const bits = value.split("-")
-            if (bits.length >= 3)
-                return "GPT-" + bits[1] + " " + bits.slice(2).map(function (s) {
-                    return s.charAt(0).toUpperCase() + s.slice(1)
-                }).join(" ")
+
+        const parts = String(value).replace(/^claude-/, "")
+                                   .replace(/-\d{8}$/, "").split("-")
+        const words = []
+        let version = []
+
+        function flushVersion() {
+            if (version.length === 0)
+                return
+            // "GPT-5.1" carries its version on a hyphen; every other family
+            // spaces it off ("Sonnet 4.5").
+            const joined = version.join(".")
+            if (words.length > 0 && words[words.length - 1] === "GPT")
+                words[words.length - 1] += "-" + joined
+            else
+                words.push(joined)
+            version = []
         }
-        if (value.indexOf("claude-") === 0)
-            return value.split("-").map(function (s) {
-                return s.charAt(0).toUpperCase() + s.slice(1)
-            }).join(" ")
-        return value
+
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i]
+            if (part.length === 0)
+                continue
+            if (/^\d/.test(part)) {
+                version.push(part)
+                continue
+            }
+            flushVersion()
+            words.push(part === "gpt" ? "GPT"
+                                      : part.charAt(0).toUpperCase() + part.slice(1))
+        }
+        flushVersion()
+
+        return words.length > 0 ? words.join(" ") : "Unknown model"
     }
 
     function historyCaption() {
