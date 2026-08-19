@@ -59,10 +59,6 @@ Column {
         return String(n)
     }
 
-    function remaining(pct) {
-        return Math.max(0, 100 - Math.max(0, Math.min(100, pct || 0)))
-    }
-
     function countdown(reset) {
         const seconds = reset - now
         if (!reset || seconds <= 0)
@@ -79,6 +75,38 @@ Column {
 
     function resetLabel(reset) {
         return reset ? "Resets in " + countdown(reset) : "Window not started"
+    }
+
+    // Follows the shell's own clock preference, minus its seconds setting —
+    // seconds on a reset that is hours away would be noise.
+    function timeFormat() {
+        if (SettingsData.use24HourClock)
+            return "hh:mm"
+        return SettingsData.padHours12Hour ? "hh:mm AP" : "h:mm AP"
+    }
+
+    function startOfDay(date) {
+        const start = new Date(date)
+        start.setHours(0, 0, 0, 0)
+        return start.getTime()
+    }
+
+    // The wall-clock moment a window reopens, to sit alongside the countdown.
+    // Weekly windows land days out, so anything past today carries its weekday;
+    // past a week a weekday would name the same day as today, so it takes a
+    // date instead.
+    function resetTime(reset) {
+        if (!reset)
+            return ""
+        const at = new Date(reset * 1000)
+        const clock = at.toLocaleTimeString(Qt.locale(), timeFormat())
+        const days = Math.round((startOfDay(at) - startOfDay(new Date(now * 1000)))
+                                / 86400000)
+        if (days <= 0)
+            return clock
+        if (days < 7)
+            return at.toLocaleDateString(Qt.locale(), "ddd") + " " + clock
+        return at.toLocaleDateString(Qt.locale(), "d MMM") + " " + clock
     }
 
     // Local midnight, recomputed from the tick so a popout left open across
@@ -278,8 +306,8 @@ Column {
                     }
                     StyledText {
                         anchors.right: parent.right
-                        text: root.remaining(modelData.pct) + "% remaining"
-                        color: Theme.surfaceTextMedium
+                        text: root.resetTime(modelData.resets_at)
+                        color: Theme.surfaceVariantText
                         font.pixelSize: Theme.fontSizeSmall
                     }
                 }

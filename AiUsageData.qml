@@ -62,6 +62,39 @@ Item {
         return reset ? "Resets in " + countdown(reset) : "Window not started"
     }
 
+    // Follows the shell's own clock preference, minus its seconds setting —
+    // seconds on a reset that is hours away would be noise.
+    function timeFormat() {
+        if (SettingsData.use24HourClock)
+            return "hh:mm"
+        return SettingsData.padHours12Hour ? "hh:mm AP" : "h:mm AP"
+    }
+
+    function startOfDay(date) {
+        const start = new Date(date)
+        start.setHours(0, 0, 0, 0)
+        return start.getTime()
+    }
+
+    // The wall-clock moment a window reopens, to sit alongside the countdown.
+    // Weekly windows land days out, so anything past today carries its weekday;
+    // past a week a weekday would name the same day as today, so it takes a
+    // date instead. Rounding the day difference keeps the 23- and 25-hour days
+    // either side of a daylight-saving change on the right label.
+    function resetTime(reset) {
+        if (!reset)
+            return ""
+        const at = new Date(reset * 1000)
+        const clock = at.toLocaleTimeString(Qt.locale(), timeFormat())
+        const days = Math.round((startOfDay(at) - startOfDay(new Date(now * 1000)))
+                                / 86400000)
+        if (days <= 0)
+            return clock
+        if (days < 7)
+            return at.toLocaleDateString(Qt.locale(), "ddd") + " " + clock
+        return at.toLocaleDateString(Qt.locale(), "d MMM") + " " + clock
+    }
+
     function minutesSince(ts) {
         return ts ? Math.max(0, Math.floor((now - ts) / 60)) : -1
     }

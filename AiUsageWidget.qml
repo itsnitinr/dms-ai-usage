@@ -56,6 +56,7 @@ PluginComponent {
 
     function countdown(reset) { return usageData ? usageData.countdown(reset) : "" }
     function resetLabel(reset) { return usageData ? usageData.resetLabel(reset) : "" }
+    function resetTime(reset) { return usageData ? usageData.resetTime(reset) : "" }
     function minutesSince(ts) { return usageData ? usageData.minutesSince(ts) : -1 }
     function freshness(snapshot) { return usageData ? usageData.freshness(snapshot) : "" }
     function refresh() { if (usageData) usageData.refresh() }
@@ -66,10 +67,6 @@ PluginComponent {
     readonly property bool showClaudeLimits: showClaude && claudeLimits.length > 0
     readonly property int visibleProviderCount:
         (showCodexLimits ? 1 : 0) + (showClaudeLimits ? 1 : 0)
-
-    function remaining(pct) {
-        return Math.max(0, 100 - Math.max(0, Math.min(100, pct || 0)))
-    }
 
     function usageColor(pct) {
         return pct >= critPct ? Theme.error : pct >= warnPct ? Theme.warning : Theme.primary
@@ -216,9 +213,10 @@ PluginComponent {
                             font.pixelSize: Theme.fontSizeSmall
                         }
                         StyledText {
+                            readonly property int t: root.tick
                             anchors.right: parent.right
-                            text: root.remaining(modelData.pct) + "% remaining"
-                            color: Theme.surfaceTextMedium
+                            text: root.resetTime(modelData.resets_at)
+                            color: Theme.surfaceVariantText
                             font.pixelSize: Theme.fontSizeSmall
                         }
                     }
