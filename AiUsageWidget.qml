@@ -13,6 +13,7 @@ PluginComponent {
     readonly property int critPct: 90
     readonly property bool showClaude: pluginData.showClaude !== false
     readonly property bool showCodex: pluginData.showCodex !== false
+    readonly property bool tintBarIcon: pluginData.tintBarIcon !== false
     readonly property real contentPadding: Theme.spacingS
 
     property int currentTab: 0            // Overview, Codex, Claude
@@ -80,7 +81,12 @@ PluginComponent {
         return maximum
     }
 
+    // Off means off: the icon sits at the ordinary bar text color whatever the
+    // numbers say, including the dim "nothing fetched yet" shade, so it is
+    // indistinguishable from every other widget in the bar.
     function pillColor() {
+        if (!tintBarIcon)
+            return Theme.surfaceText
         const maximum = maxPct()
         if (maximum < 0)
             return Theme.surfaceTextMedium

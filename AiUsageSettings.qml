@@ -19,4 +19,11 @@ PluginSettings {
         description: "Live subscription limits from Codex App Server"
         defaultValue: true
     }
+
+    ToggleSetting {
+        settingKey: "tintBarIcon"
+        label: "Tint the bar icon by usage"
+        description: "Amber past 70%, red past 90%. Off keeps the normal bar text color."
+        defaultValue: true
+    }
 }

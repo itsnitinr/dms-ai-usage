@@ -22,7 +22,8 @@ provider drops out entirely.
 
 The bar shows a single `insights` icon, tinted by the highest utilization across
 everything enabled: normal text color under 70%, amber at 70%, red at 90%. It
-stays quiet until something needs attention.
+stays quiet until something needs attention. Turn the tint off in settings for a
+plain icon that never changes color.
 
 Left-click for a three-tab detail popout:
 
@@ -93,13 +94,16 @@ midnights, including daylight-saving transitions.
 Settings → Plugins → AI Usage:
 
 - **Show Claude Code** / **Show Codex**
+- **Tint the bar icon by usage**
 
-These switches control which providers appear in Overview and contribute to the
+The first two control which providers appear in Overview and contribute to the
 bar warning color. Provider tabs remain available for direct inspection.
 
-Thresholds live in `AiUsageWidget.qml`: `warnPct` (70, amber) and `critPct`
-(90, red). The bar glyph is the `name:` on the two
-`DankIcon`s in the pill components — any Material Symbols name works.
+The third turns the bar icon's warning color off entirely: the glyph holds the
+ordinary bar text color at any utilization, and the popout still carries the
+percentages. Thresholds live in `AiUsageWidget.qml`: `warnPct` (70, amber) and
+`critPct` (90, red). The bar glyph is the `name:` on the two `DankIcon`s in the
+pill components — any Material Symbols name works.
 
 Note that `horizontalBarPill` / `verticalBarPill` should contain **content
 only**. `PluginComponent` wraps whatever you supply in a `BasePill`, which
