@@ -12,6 +12,9 @@ Column {
     property color providerColor: Theme.primary
     property string plan: ""
     property string freshness: "live"
+    // Both empty unless this provider's sign-in is what is missing.
+    property string authLabel: ""
+    property string authNote: ""
     property var limits: []
     property var history: null
     property bool historyLoading: false
@@ -235,7 +238,8 @@ Column {
         StyledText {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.limits.length > 0 ? root.freshness : "unavailable"
+            text: root.limits.length > 0 ? root.freshness
+                                         : (root.authLabel || "unavailable")
             color: Theme.surfaceTextMedium
             font.pixelSize: Theme.fontSizeSmall
         }
@@ -317,8 +321,14 @@ Column {
 
         StyledText {
             width: parent.width
-            visible: root.limits.length === 0
-            text: "No live limit data for this provider."
+            // The note outlives the numbers in both directions. It shows over an
+            // empty section, and it shows under limits that are still on screen
+            // only because they were carried forward — which is exactly when a
+            // reader wants to know why the percentages stopped moving.
+            visible: text.length > 0
+            text: root.authNote
+                  || (root.limits.length === 0
+                      ? "No live limit data for this provider." : "")
             color: Theme.surfaceVariantText
             font.pixelSize: Theme.fontSizeSmall
             wrapMode: Text.WordWrap

@@ -51,7 +51,15 @@ PluginComponent {
     // that first fetch completes avoids flashing the pill away on every shell
     // start. fetch-usage.sh carries a failed provider forward for an hour, so
     // this waits out a transient outage rather than reacting to one.
-    readonly property bool nothingToShow: fetchedOnce && !hasData
+    //
+    // An expired token is the exception, and the reason is circular: it is the
+    // one empty state that comes with an explanation and a fix, and collapsing
+    // the pill takes away the only way to reach either. A Claude-only machine
+    // would otherwise lose the widget an hour after the token lapsed, with
+    // nothing on screen connecting that to the session it needs to start.
+    readonly property bool claudeTokenExpired:
+        showClaude && (usageData?.claudeAuth ?? "ok") === "expired"
+    readonly property bool nothingToShow: fetchedOnce && !hasData && !claudeTokenExpired
     onNothingToShowChanged: setVisibilityOverride(!nothingToShow)
     readonly property int tick: usageData?.now ?? Math.floor(Date.now() / 1000)
 
@@ -60,6 +68,8 @@ PluginComponent {
     function resetTime(reset) { return usageData ? usageData.resetTime(reset) : "" }
     function minutesSince(ts) { return usageData ? usageData.minutesSince(ts) : -1 }
     function freshness(snapshot) { return usageData ? usageData.freshness(snapshot) : "" }
+    function authLabel(provider) { return usageData ? usageData.authLabel(provider) : "" }
+    function authNote(provider) { return usageData ? usageData.authNote(provider) : "" }
     function refresh() { if (usageData) usageData.refresh() }
 
     readonly property var codexLimits: usageData?.codex?.limits ?? []
@@ -68,6 +78,9 @@ PluginComponent {
     readonly property bool showClaudeLimits: showClaude && claudeLimits.length > 0
     readonly property int visibleProviderCount:
         (showCodexLimits ? 1 : 0) + (showClaudeLimits ? 1 : 0)
+    // Empty unless Claude's sign-in is what is missing, and empty while Claude
+    // is switched off — a provider nobody asked to see owes no explanation.
+    readonly property string claudeAuthNote: showClaude ? authNote("claude") : ""
 
     function usageColor(pct) {
         return pct >= critPct ? Theme.error : pct >= warnPct ? Theme.warning : Theme.primary
@@ -381,7 +394,18 @@ PluginComponent {
 
                         StyledText {
                             width: parent.width
-                            visible: !root.hasData
+                            visible: root.claudeAuthNote.length > 0
+                            wrapMode: Text.WordWrap
+                            text: root.claudeAuthNote
+                            color: Theme.surfaceVariantText
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
+                        StyledText {
+                            width: parent.width
+                            // Yields to the note above, which says the same
+                            // thing about Claude and says it precisely.
+                            visible: !root.hasData && root.claudeAuthNote.length === 0
                             wrapMode: Text.WordWrap
                             text: root.fetchedOnce
                                 ? "No live limits found. Sign in to Claude Code or Codex."
@@ -456,6 +480,18 @@ PluginComponent {
                         value: root.freshness(root.activeProvider === "claude"
                                               ? root.usageData?.claude
                                               : root.usageData?.codex)
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "authLabel"
+                        value: root.authLabel(root.activeProvider)
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "authNote"
+                        value: root.authNote(root.activeProvider)
                     }
                     Binding {
                         target: providerLoader.item

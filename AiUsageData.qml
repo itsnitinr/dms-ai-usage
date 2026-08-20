@@ -10,6 +10,9 @@ Item {
     property var claude: null
     property var codex: null
     property int capturedAt: 0
+    // "ok" | "expired" | "signed_out", straight from fetch-usage.sh. Kept apart
+    // from the claude entry so it still applies once that entry is gone.
+    property string claudeAuth: "ok"
     // Separates "no limits yet" from "asked, and there are none". Without it an
     // empty result reads as a spinner that never finishes.
     property bool fetchedOnce: false
@@ -112,6 +115,24 @@ Item {
         if (ts <= 0 || ts >= capturedAt)
             return "live"
         return Math.max(1, minutesSince(ts)) + "m ago"
+    }
+
+    // Claude's access token lapses on a timer that only the CLI resets, so the
+    // everyday reason its limits go missing is neither an outage nor an absent
+    // install — and "unavailable" describes both of those and not this one. Name
+    // the state instead, and say the thing that ends it.
+    function authLabel(provider) {
+        if (provider !== "claude" || claudeAuth === "ok")
+            return ""
+        return claudeAuth === "expired" ? "token expired" : "signed out"
+    }
+
+    function authNote(provider) {
+        if (provider !== "claude" || claudeAuth === "ok")
+            return ""
+        return claudeAuth === "expired"
+            ? "Claude's access token expired. Start a Claude Code session to renew it."
+            : "Not signed in to Claude Code."
     }
 
     function historyFor(provider) {
@@ -218,6 +239,9 @@ Item {
                 root.capturedAt = o.captured_at || 0
                 root.claude = o.claude || null
                 root.codex = o.codex || null
+                // A cache written before this field existed is not evidence of
+                // trouble, so absence reads as "ok" and the display is unchanged.
+                root.claudeAuth = o.claude_auth || "ok"
             } catch (e) {
                 console.warn("aiUsage: bad limits cache:", e)
             }

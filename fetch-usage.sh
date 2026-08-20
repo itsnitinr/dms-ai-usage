@@ -12,7 +12,8 @@
 #
 # Output:
 #   {captured_at, claude: {captured_at, limits:[{label,pct,resets_at}]}|null,
-#                 codex:  {captured_at, plan, limits:[...]}|null}
+#                 codex:  {captured_at, plan, limits:[...]}|null,
+#                 claude_auth: "ok"|"expired"|"signed_out"}
 #
 # Env:
 #   CACHE_FILE      cache path (default $XDG_CACHE_HOME/dms-ai-usage.json)
@@ -93,27 +94,66 @@ if [ -s "$cache" ]; then
   fi
 fi
 
+# Claude Code's access token sits on disk with an expiry — eight hours, in
+# practice — and only the CLI itself can renew it, from a refresh token this
+# script deliberately leaves alone. So a lapsed token is not a failure to retry
+# out of: it stays broken until a session runs, and the endpoint refuses it with
+# the same 401 a signed-out machine would get. Telling those apart is the whole
+# point, because "start Claude Code and it comes back" is the answer to one of
+# them and not the other.
+#
+# The verdict rides beside the providers rather than inside claude's entry, so
+# that entry keeps its single meaning — no live limits — in every failure case,
+# and so a carried-forward entry can still say why the numbers stopped moving.
+claude_auth=signed_out
+claude_token=$(jq -r '.claudeAiOauth.accessToken // empty' "$claude_creds" 2>/dev/null)
+if [ -n "$claude_token" ]; then
+  claude_exp=$(jq -r '(.claudeAiOauth.expiresAt // 0) / 1000 | floor' "$claude_creds" 2>/dev/null)
+  case "$claude_exp" in ''|*[!0-9]*) claude_exp=0 ;; esac
+  # A missing expiresAt reads as 0, which is not an expiry in 1970 but an
+  # unknown one; let the request itself settle those.
+  if [ "$claude_exp" -gt 0 ] && [ "$claude_exp" -le "$now" ]; then
+    claude_auth=expired
+  else
+    claude_auth=ok
+  fi
+fi
+
+# Answers into claude_result, and may downgrade claude_auth. Called plainly
+# rather than through a command substitution, so that downgrade outlives it.
+claude_result=null
 claude_usage() {
-  [ -f "$claude_creds" ] || { echo null; return; }
-  tok=$(jq -r '.claudeAiOauth.accessToken // empty' "$claude_creds" 2>/dev/null)
-  [ -n "$tok" ] || { echo null; return; }
+  claude_result=null
+  [ "$claude_auth" = ok ] || return
 
   ver=$(claude_version)
-  body=$(curl -s -m 10 \
-    -H "Authorization: Bearer $tok" \
+  nl='
+'
+  body=$(curl -s -m 10 -w "$nl%{http_code}" \
+    -H "Authorization: Bearer $claude_token" \
     -H "anthropic-beta: oauth-2025-04-20" \
     -H "User-Agent: claude-code/${ver:-2.1.0}" \
     https://api.anthropic.com/api/oauth/usage 2>/dev/null)
+  status=${body##*"$nl"}
+  body=${body%"$nl"*}
+
+  # A token the server turns down is expired in the only sense that matters
+  # here, whether or not its recorded expiry has come round: a revoked or
+  # rotated one lands identically, and the same new session fixes all three.
+  case "$status" in
+    401|403) claude_auth=expired; return ;;
+  esac
 
   # A usage response is an object with a five_hour block; error bodies are not.
-  echo "$body" | jq -e 'type == "object" and has("five_hour")' >/dev/null 2>&1 || { echo null; return; }
+  echo "$body" | jq -e 'type == "object" and has("five_hour")' >/dev/null 2>&1 || return
 
-  echo "$body" | jq --argjson now "$now" "$JQ_LIB"'
+  claude_result=$(echo "$body" | jq -c --argjson now "$now" "$JQ_LIB"'
     def lim(b; n): if b == null then empty
                    else {label: n, pct: (b.utilization | floor), resets_at: epoch(b.resets_at)} end;
     {captured_at: $now,
      limits: [lim(.five_hour; "5-hour"), lim(.seven_day; "Weekly")]}
-  ' 2>/dev/null || echo null
+  ' 2>/dev/null)
+  [ -n "$claude_result" ] || claude_result=null
 }
 
 codex_usage() {
@@ -153,15 +193,29 @@ codex_usage() {
   ' 2>/dev/null || echo null
 }
 
-c=$(claude_usage); [ -n "$c" ] || c=null
-x=$(codex_usage);  [ -n "$x" ] || x=null
+claude_usage;     c=$claude_result
+x=$(codex_usage); [ -n "$x" ] || x=null
 
 # Neither provider answered. Keep the previous snapshot — stale limits beat no
 # limits — and hand the stale payload back so a caller reading stdout still has
 # something to show. captured_at deliberately stays where it was, so the next
 # run retries immediately instead of sitting out the min_age window.
+#
+# The auth verdict is the exception: it is fresh news about why Claude went
+# quiet, it costs nothing to be wrong about later, and withholding it until some
+# provider happens to answer would strand the reader on the stale-and-silent
+# reading this whole field exists to replace. Stamp it on and keep the rest.
 if [ "$c" = null ] && [ "$x" = null ]; then
-  [ -s "$cache" ] && cat "$cache"
+  if [ -s "$cache" ]; then
+    stamped=$(jq -c --arg auth "$claude_auth" '.claude_auth = $auth' "$cache" 2>/dev/null)
+    if [ -n "$stamped" ]; then
+      tmp="$cache.tmp.$$"
+      printf '%s' "$stamped" > "$tmp" && mv -f "$tmp" "$cache"
+      printf '%s' "$stamped"
+    else
+      cat "$cache"
+    fi
+  fi
   exit 1
 fi
 
@@ -189,7 +243,8 @@ if [ "$c" = null ]; then c=$(prev_entry claude); [ -n "$c" ] || c=null; fi
 if [ "$x" = null ]; then x=$(prev_entry codex);  [ -n "$x" ] || x=null; fi
 
 out=$(jq -n --argjson now "$now" --argjson claude "$c" --argjson codex "$x" \
-  '{captured_at: $now, claude: $claude, codex: $codex}') || exit 1
+  --arg auth "$claude_auth" \
+  '{captured_at: $now, claude: $claude, codex: $codex, claude_auth: $auth}') || exit 1
 
 tmp="$cache.tmp.$$"
 printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"

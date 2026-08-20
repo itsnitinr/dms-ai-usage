@@ -51,11 +51,20 @@ monitors share a single fetch.
 **Claude** — reads the OAuth access token Claude Code already stores in
 `~/.claude/.credentials.json` and calls `api.anthropic.com/api/oauth/usage`
 with it, the same endpoint the client uses for `/usage`. The token goes
-nowhere else. If it 401s (signed out), the provider is eventually omitted.
+nowhere else.
 
 That endpoint allows only about two requests per five minutes, and Claude Code
 itself draws on the same budget, so a poll returning 429 is routine — hence the
 6 minute timer and the carry-forward above.
+
+The token expires after about eight hours, and only Claude Code itself can renew
+it — from a refresh token this plugin never touches. So the ordinary reason
+Claude's limits go missing is a lapsed token, not an outage, and the snapshot
+carries a `claude_auth` field (`ok` / `expired` / `signed_out`) to say so:
+`expired` covers both a passed `expiresAt` and a token the endpoint refuses,
+since starting a session is the fix for either. The widget names the state
+rather than reporting a bare "unavailable", and holds its place in the bar while
+a token is expired so the explanation stays reachable.
 
 **Codex limits** — starts the local Codex App Server and calls its supported
 `account/rateLimits/read` JSON-RPC method. The response includes the live usage
