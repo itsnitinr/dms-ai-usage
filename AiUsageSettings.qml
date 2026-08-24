@@ -20,6 +20,18 @@ PluginSettings {
         defaultValue: true
     }
 
+    SelectionSetting {
+        settingKey: "barDisplay"
+        label: "Bar pill contents"
+        description: "The percentage shown is the highest across everything enabled"
+        defaultValue: "icon"
+        options: [
+            {"label": "Icon only", "value": "icon"},
+            {"label": "Icon and percentage", "value": "iconValue"},
+            {"label": "Percentage only", "value": "value"}
+        ]
+    }
+
     ToggleSetting {
         settingKey: "tintBarIcon"
         label: "Tint the bar icon by usage"

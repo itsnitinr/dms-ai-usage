@@ -20,10 +20,22 @@ provider keeps its previous numbers and the marker becomes their age (`7m ago`)
 rather than the row disappearing. After an hour with no successful fetch the
 provider drops out entirely.
 
-The bar shows a single `insights` icon, tinted by the highest utilization across
+The bar shows an `insights` icon, tinted by the highest utilization across
 everything enabled: normal text color under 70%, amber at 70%, red at 90%. It
 stays quiet until something needs attention. Turn the tint off in settings for a
 plain icon that never changes color.
+
+That percentage can sit in the bar beside the icon, or replace it — see **Bar
+pill contents** below. It is the same maximum the tint reads, so the digits and
+the color can never disagree. A vertical bar drops the percent sign, because the
+pill is only as wide as the bar is thick.
+
+Hovering the pill names which limit that number came from —
+`Codex Weekly 12% · Claude Weekly 20%`, plus `Credits 43%` when the account has
+them. `DankTooltip` is one line and clamps at 300px, so the window labels drop
+out when the line would not fit whole, rather than letting an ellipsis eat
+whichever provider comes last. The tooltip yields while the popout is open,
+including on bars that open popouts on hover.
 
 Left-click for a three-tab detail popout:
 
@@ -113,13 +125,20 @@ midnights, including daylight-saving transitions.
 Settings → Plugins → AI Usage:
 
 - **Show Claude Code** / **Show Codex**
+- **Bar pill contents** — icon only, icon and percentage, or percentage only
 - **Tint the bar icon by usage**
 - **Count credit spend in the bar tint**
 
 The first two control which providers appear in Overview and contribute to the
 bar warning color. Provider tabs remain available for direct inspection.
 
-The third turns the bar icon's warning color off entirely: the glyph holds the
+**Bar pill contents** decides what the pill draws; the hover summary is there in
+every mode. Percentage-only suits a bar already carrying plenty of glyphs. Note
+that icon-only with the tint switched off leaves the pill saying nothing at all
+until you hover or click it — which is a reasonable thing to want, and worth
+choosing on purpose rather than ending up with.
+
+The tint toggle turns the bar icon's warning color off entirely: the glyph holds the
 ordinary bar text color at any utilization, and the popout still carries the
 percentages. Thresholds live in `AiUsageWidget.qml`: `warnPct` (70, amber) and
 `critPct` (90, red). The bar glyph is the `name:` on the two `DankIcon`s in the

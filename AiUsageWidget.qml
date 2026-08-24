@@ -13,6 +13,10 @@ PluginComponent {
     readonly property int critPct: 90
     readonly property bool showClaude: pluginData.showClaude !== false
     readonly property bool showCodex: pluginData.showCodex !== false
+    // "icon" | "iconValue" | "value"
+    readonly property string barDisplay: pluginData.barDisplay || "icon"
+    readonly property bool showBarIcon: barDisplay !== "value"
+    readonly property bool showBarValue: barDisplay !== "icon"
     readonly property bool tintBarIcon: pluginData.tintBarIcon !== false
     // Off by default: credits are money rather than a window that reopens, and
     // an amber bar that cannot be waited out is a different message from the one
@@ -107,6 +111,80 @@ PluginComponent {
         if (tintOnSpend && claudeSpend)
             maximum = Math.max(maximum, claudeSpend.limit_reached ? 100 : claudeSpend.pct)
         return maximum
+    }
+
+    // The number in the bar reads the same maximum the tint does, so the digits
+    // and the color can never disagree about how bad things are. A bar too
+    // narrow for a percent sign — every vertical one — drops it and keeps the
+    // digits, which are the part worth reading.
+    function barValue(withSign) {
+        const maximum = maxPct()
+        if (maximum < 0)
+            return "—"
+        return withSign ? maximum + "%" : String(maximum)
+    }
+
+    function worstLimit(limits) {
+        let worst = null
+        for (let i = 0; i < limits.length; i++)
+            if (!worst || limits[i].pct > worst.pct)
+                worst = limits[i]
+        return worst
+    }
+
+    // One line, because DankTooltip is one line: it clamps at 300px and elides
+    // whatever runs past. So the long form — which names the window each number
+    // belongs to — gives way to a short one rather than letting an ellipsis eat
+    // whichever provider happens to sit last. The pill says how bad it is; this
+    // says which of them is that bad; the popout has the rest.
+    function tooltipText() {
+        const parts = []
+        const brief = []
+
+        function add(long, short) {
+            parts.push(long)
+            brief.push(short)
+        }
+
+        if (showCodex) {
+            const worst = worstLimit(codexLimits)
+            if (worst)
+                add("Codex " + worst.label + " " + worst.pct + "%",
+                    "Codex " + worst.pct + "%")
+        }
+        if (showClaude) {
+            const worst = worstLimit(claudeLimits)
+            if (worst)
+                add("Claude " + worst.label + " " + worst.pct + "%",
+                    "Claude " + worst.pct + "%")
+            else if (authLabel("claude"))
+                add("Claude " + authLabel("claude"), "Claude " + authLabel("claude"))
+            if (claudeSpend) {
+                const credits = "Credits "
+                              + (claudeSpend.limit_reached ? "spent" : claudeSpend.pct + "%")
+                add(credits, credits)
+            }
+        }
+
+        if (parts.length === 0)
+            return fetchedOnce ? "No live limits" : "Loading live limits…"
+        const full = parts.join(" · ")
+        return fitsTooltip(full) ? full : brief.join(" · ")
+    }
+
+    // Whether DankTooltip can show a line whole. It sizes itself to the text and
+    // then clamps at 300px, padding included, so this measures rather than
+    // counting characters: font scale is a user setting, and a line that fits at
+    // 12px does not at 15.
+    StyledText {
+        id: tooltipRuler
+        visible: false
+        font.pixelSize: Theme.fontSizeSmall
+    }
+
+    function fitsTooltip(text) {
+        tooltipRuler.text = text
+        return tooltipRuler.implicitWidth <= 300 - Theme.spacingM * 2
     }
 
     // Off means off: the icon sits at the ordinary bar text color whatever the
@@ -347,20 +425,116 @@ PluginComponent {
 
     pillRightClickAction: function () { root.refresh() }
 
-    horizontalBarPill: Component {
-        DankIcon {
-            name: "insights"
-            size: root.iconSize
-            color: root.pillColor()
+    // Content only — BasePill draws the background, owns click and ripple, and
+    // sizes itself from this item's implicit size, which is why the layout below
+    // hands its own implicit size up rather than filling anything.
+    component BarPill: Item {
+        id: barPill
+
+        property bool vertical: false
+
+        // The popout says everything the tooltip does and says it better, so
+        // while it is open the tooltip stays out of the way. This also covers
+        // bars configured to open popouts on hover, where the two would
+        // otherwise appear together on the same gesture.
+        readonly property bool wantsTooltip:
+            hover.hovered && !(root.usageData?.popoutVisible ?? false)
+
+        implicitWidth: layout.implicitWidth
+        implicitHeight: layout.implicitHeight
+
+        Grid {
+            id: layout
+
+            anchors.centerIn: parent
+            columns: barPill.vertical ? 1 : 2
+            spacing: barPill.vertical ? 0 : Theme.spacingXXS
+            horizontalItemAlignment: Grid.AlignHCenter
+            verticalItemAlignment: Grid.AlignVCenter
+
+            DankIcon {
+                name: "insights"
+                size: root.iconSize
+                color: root.pillColor()
+                visible: root.showBarIcon
+            }
+
+            StyledText {
+                text: root.barValue(!barPill.vertical)
+                visible: root.showBarValue
+                color: root.pillColor()
+                font.pixelSize: barPill.vertical ? Theme.fontSizeSmall - 1
+                                                 : Theme.fontSizeSmall
+                font.weight: Font.Medium
+            }
+        }
+
+        // Not a MouseArea: BasePill's own sits behind this content and owns the
+        // click, and a hover-only handler has no business competing for it.
+        HoverHandler {
+            id: hover
+        }
+
+        Loader {
+            id: tooltipLoader
+            active: false
+            sourceComponent: DankTooltip {}
+        }
+
+        onWantsTooltipChanged: wantsTooltip ? showTooltip() : hideTooltip()
+
+        // DankTooltip is a layer-shell window placed in screen coordinates, so
+        // it has to be told where the bar edge is; the arithmetic here is the
+        // same one every built-in bar widget does. See DiskUsage.qml.
+        function showTooltip() {
+            const screen = root.parentScreen
+            if (!screen)
+                return
+
+            tooltipLoader.active = true
+            if (!tooltipLoader.item)
+                return
+
+            const edge = root.axis?.edge ?? "top"
+            const text = root.tooltipText()
+
+            if (barPill.vertical) {
+                const left = edge === "left"
+                const x = left
+                    ? root.barThickness + root.barSpacing + Theme.spacingXS
+                    : screen.width - root.barThickness - root.barSpacing - Theme.spacingXS
+                // A bar on a screen stacked below another reports window
+                // coordinates that leave out its own thickness. Auto-hide bars
+                // do not, since they are not reserving space to begin with.
+                const autoHide = root.barConfig?.autoHide ?? false
+                const offset = (!autoHide && screen.y > 0)
+                    ? root.barThickness + (root.barConfig?.spacing ?? 4) : 0
+                const at = barPill.mapToItem(null, barPill.width / 2, barPill.height / 2)
+                tooltipLoader.item.show(text, x, at.y + offset, screen, left, !left)
+            } else {
+                const height = Theme.fontSizeSmall * 1.5 + Theme.spacingS * 2
+                const y = edge === "bottom"
+                    ? screen.height - root.barThickness - root.barSpacing
+                      - Theme.spacingXS - height
+                    : root.barThickness + root.barSpacing + Theme.spacingXS
+                const at = barPill.mapToItem(null, barPill.width / 2, 0)
+                tooltipLoader.item.show(text, at.x, y, screen, false, false)
+            }
+        }
+
+        function hideTooltip() {
+            if (tooltipLoader.item)
+                tooltipLoader.item.hide()
+            tooltipLoader.active = false
         }
     }
 
+    horizontalBarPill: Component {
+        BarPill {}
+    }
+
     verticalBarPill: Component {
-        DankIcon {
-            name: "insights"
-            size: root.iconSize
-            color: root.pillColor()
-        }
+        BarPill { vertical: true }
     }
 
     popoutWidth: 420
