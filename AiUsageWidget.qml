@@ -14,6 +14,10 @@ PluginComponent {
     readonly property bool showClaude: pluginData.showClaude !== false
     readonly property bool showCodex: pluginData.showCodex !== false
     readonly property bool tintBarIcon: pluginData.tintBarIcon !== false
+    // Off by default: credits are money rather than a window that reopens, and
+    // an amber bar that cannot be waited out is a different message from the one
+    // this tint has meant until now. Opt in to fold them together.
+    readonly property bool tintOnSpend: pluginData.tintOnSpend === true
     readonly property real contentPadding: Theme.spacingS
 
     property int currentTab: 0            // Overview, Codex, Claude
@@ -70,14 +74,21 @@ PluginComponent {
     function freshness(snapshot) { return usageData ? usageData.freshness(snapshot) : "" }
     function authLabel(provider) { return usageData ? usageData.authLabel(provider) : "" }
     function authNote(provider) { return usageData ? usageData.authNote(provider) : "" }
+    function spendAmount(spend) { return usageData ? usageData.spendAmount(spend) : "" }
     function refresh() { if (usageData) usageData.refresh() }
 
     readonly property var codexLimits: usageData?.codex?.limits ?? []
     readonly property var claudeLimits: usageData?.claude?.limits ?? []
     readonly property bool showCodexLimits: showCodex && codexLimits.length > 0
     readonly property bool showClaudeLimits: showClaude && claudeLimits.length > 0
+    // Null unless the account has overage credits switched on.
+    readonly property var claudeSpend: showClaude ? (usageData?.claude?.spend ?? null) : null
+    // Credits arrive in the same entry as the limits, so in practice they show
+    // up together — but the section is worth drawing for either one alone
+    // rather than letting the amount vanish with the windows.
+    readonly property bool showClaudeSection: showClaudeLimits || claudeSpend !== null
     readonly property int visibleProviderCount:
-        (showCodexLimits ? 1 : 0) + (showClaudeLimits ? 1 : 0)
+        (showCodexLimits ? 1 : 0) + (showClaudeSection ? 1 : 0)
     // Empty unless Claude's sign-in is what is missing, and empty while Claude
     // is switched off — a provider nobody asked to see owes no explanation.
     readonly property string claudeAuthNote: showClaude ? authNote("claude") : ""
@@ -91,6 +102,10 @@ PluginComponent {
         const limits = codexLimits.concat(claudeLimits)
         for (let i = 0; i < limits.length; i++)
             maximum = Math.max(maximum, limits[i].pct)
+        // An uncapped credit balance has no percentage to contribute: pct is 0
+        // there, which would not raise the maximum anyway.
+        if (tintOnSpend && claudeSpend)
+            maximum = Math.max(maximum, claudeSpend.limit_reached ? 100 : claudeSpend.pct)
         return maximum
     }
 
@@ -107,6 +122,86 @@ PluginComponent {
              : maximum >= warnPct ? Theme.warning : Theme.surfaceText
     }
 
+    // Credits sit below the windows they back up: the meters above say when
+    // Claude stops, this one says what it costs to carry on past that. Declared
+    // ahead of OverviewLimits, which uses it.
+    component SpendMeter: Column {
+        id: spendMeter
+
+        required property var spend
+        required property color accent
+
+        // Without a cap there is no fraction to draw, so the meter and the
+        // percentage both drop and the amount speaks for itself.
+        readonly property bool capped: (spend?.limit_minor ?? 0) > 0
+        readonly property bool reached: spend?.limit_reached ?? false
+        readonly property color meterColor: reached ? Theme.error : accent
+
+        width: parent?.width ?? 0
+        visible: spend !== null
+        spacing: Theme.spacingXXS
+
+        Item {
+            width: parent.width
+            height: creditsLabel.implicitHeight
+
+            StyledText {
+                id: creditsLabel
+                anchors.left: parent.left
+                text: "Credits"
+                color: Theme.surfaceText
+                font.pixelSize: Theme.fontSizeSmall
+            }
+            StyledText {
+                anchors.right: parent.right
+                visible: spendMeter.capped
+                text: (spendMeter.spend?.pct ?? 0) + "% used"
+                color: spendMeter.meterColor
+                font.pixelSize: Theme.fontSizeSmall
+                font.weight: Font.Medium
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: 5
+            radius: height / 2
+            visible: spendMeter.capped
+            color: Theme.surfaceVariant
+
+            Rectangle {
+                width: parent.width * Math.max(0, Math.min(1, (spendMeter.spend?.pct ?? 0) / 100))
+                height: parent.height
+                radius: parent.radius
+                color: spendMeter.meterColor
+
+                Behavior on width {
+                    NumberAnimation { duration: Theme.shortDuration; easing.type: Easing.OutCubic }
+                }
+            }
+        }
+
+        Item {
+            width: parent.width
+            height: creditsAmount.implicitHeight
+
+            StyledText {
+                id: creditsAmount
+                anchors.left: parent.left
+                text: root.spendAmount(spendMeter.spend)
+                color: Theme.surfaceVariantText
+                font.pixelSize: Theme.fontSizeSmall
+            }
+            StyledText {
+                anchors.right: parent.right
+                visible: spendMeter.reached
+                text: "Limit reached"
+                color: Theme.error
+                font.pixelSize: Theme.fontSizeSmall
+            }
+        }
+    }
+
     component OverviewLimits: Column {
         id: overviewLimits
 
@@ -114,6 +209,7 @@ PluginComponent {
         required property url providerIcon
         required property color providerColor
         required property var limits
+        property var spend: null
         property string plan: ""
         property string freshness: "live"
         property bool first: false
@@ -240,6 +336,11 @@ PluginComponent {
                         }
                     }
                 }
+            }
+
+            SpendMeter {
+                spend: overviewLimits.spend
+                accent: root.usageColor(overviewLimits.spend?.pct ?? 0)
             }
         }
     }
@@ -383,13 +484,14 @@ PluginComponent {
 
                         OverviewLimits {
                             width: parent.width
-                            visible: root.showClaudeLimits
+                            visible: root.showClaudeSection
                             first: !root.showCodexLimits
                             providerName: "Claude"
                             providerIcon: Qt.resolvedUrl("assets/claude.svg")
                             providerColor: Theme.primary
                             freshness: root.freshness(root.usageData?.claude)
                             limits: root.claudeLimits
+                            spend: root.claudeSpend
                         }
 
                         StyledText {
@@ -499,6 +601,12 @@ PluginComponent {
                         property: "limits"
                         value: root.activeProvider === "claude"
                                ? root.claudeLimits : root.codexLimits
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "spend"
+                        value: root.activeProvider === "claude" ? root.claudeSpend : null
                     }
                     Binding {
                         target: providerLoader.item

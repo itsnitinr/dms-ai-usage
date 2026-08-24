@@ -102,6 +102,38 @@ Item {
         return ts ? Math.max(0, Math.floor((now - ts) / 60)) : -1
     }
 
+    // Credit amounts arrive as minor units with their own exponent (858 with
+    // exponent 2 is $8.58), so the exponent decides the decimal places rather
+    // than the locale: a currency that has none — JPY — must not be handed two.
+    // Falls back to the bare code for a currency with no symbol here, since
+    // "1200 CHF" reads correctly and "$1200" would not.
+    readonly property var currencySymbols: ({
+        "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥",
+        "INR": "₹", "CAD": "CA$", "AUD": "A$"
+    })
+
+    function formatMoney(minor, currency, exponent) {
+        const places = Math.max(0, exponent === undefined || exponent === null
+                                   ? 2 : exponent)
+        const amount = (minor || 0) / Math.pow(10, places)
+        const symbol = currencySymbols[currency || "USD"]
+        return symbol ? symbol + amount.toFixed(places)
+                      : amount.toFixed(places) + " " + (currency || "")
+    }
+
+    // A fraction when there is a cap to be a fraction of. An account with
+    // credits enabled and no cap has only an amount to report, and pairing it
+    // with a percentage of nothing would invent a limit that does not exist.
+    function spendAmount(spend) {
+        if (!spend)
+            return ""
+        const used = formatMoney(spend.used_minor, spend.currency, spend.exponent)
+        if (!spend.limit_minor || spend.limit_minor <= 0)
+            return used + " used"
+        return used + " of "
+               + formatMoney(spend.limit_minor, spend.currency, spend.exponent)
+    }
+
     // A provider whose entry predates the snapshot holding it was carried
     // forward from an earlier fetch because this one failed — see the tail of
     // fetch-usage.sh. Labelling those numbers "live" is the one thing this

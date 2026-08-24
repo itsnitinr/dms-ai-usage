@@ -16,6 +16,8 @@ Column {
     property string authLabel: ""
     property string authNote: ""
     property var limits: []
+    // Overage credits, for a provider and account that have them. Null otherwise.
+    property var spend: null
     property var history: null
     property bool historyLoading: false
     property bool historyFailed: false
@@ -60,6 +62,33 @@ Column {
         if (n >= 1000)
             return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "K"
         return String(n)
+    }
+
+    // Minor units with their own exponent (858 with exponent 2 is $8.58), so the
+    // exponent decides the decimal places rather than the locale — a currency
+    // that has none must not be handed two. See AiUsageData.qml.
+    readonly property var currencySymbols: ({
+        "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥",
+        "INR": "₹", "CAD": "CA$", "AUD": "A$"
+    })
+
+    function formatMoney(minor, currency, exponent) {
+        const places = Math.max(0, exponent === undefined || exponent === null
+                                   ? 2 : exponent)
+        const amount = (minor || 0) / Math.pow(10, places)
+        const symbol = currencySymbols[currency || "USD"]
+        return symbol ? symbol + amount.toFixed(places)
+                      : amount.toFixed(places) + " " + (currency || "")
+    }
+
+    function spendAmount(value) {
+        if (!value)
+            return ""
+        const used = formatMoney(value.used_minor, value.currency, value.exponent)
+        if (!value.limit_minor || value.limit_minor <= 0)
+            return used + " used"
+        return used + " of "
+               + formatMoney(value.limit_minor, value.currency, value.exponent)
     }
 
     function countdown(reset) {
@@ -315,6 +344,80 @@ Column {
                         font.pixelSize: Theme.fontSizeSmall
                     }
                 }
+                }
+            }
+
+            // Below the windows it backs up: the meters above say when this
+            // provider stops, this one says what carrying on past that costs.
+            Column {
+                id: credits
+
+                readonly property bool capped: (root.spend?.limit_minor ?? 0) > 0
+                readonly property bool reached: root.spend?.limit_reached ?? false
+                readonly property color meterColor:
+                    reached ? Theme.error : root.providerColor
+
+                width: parent.width
+                visible: root.spend !== null
+                spacing: Theme.spacingXXS
+
+                Item {
+                    width: parent.width
+                    height: creditsLabel.implicitHeight
+
+                    StyledText {
+                        id: creditsLabel
+                        anchors.left: parent.left
+                        text: "Credits"
+                        color: Theme.surfaceText
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+                    StyledText {
+                        anchors.right: parent.right
+                        // Without a cap there is no fraction to state, and a
+                        // percentage of nothing would invent one.
+                        visible: credits.capped
+                        text: (root.spend?.pct ?? 0) + "% used"
+                        color: credits.meterColor
+                        font.pixelSize: Theme.fontSizeSmall
+                        font.weight: Font.Medium
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 5
+                    radius: height / 2
+                    visible: credits.capped
+                    color: Theme.surfaceVariant
+
+                    Rectangle {
+                        width: parent.width
+                               * Math.max(0, Math.min(1, (root.spend?.pct ?? 0) / 100))
+                        height: parent.height
+                        radius: parent.radius
+                        color: credits.meterColor
+                    }
+                }
+
+                Item {
+                    width: parent.width
+                    height: creditsAmount.implicitHeight
+
+                    StyledText {
+                        id: creditsAmount
+                        anchors.left: parent.left
+                        text: root.spendAmount(root.spend)
+                        color: Theme.surfaceVariantText
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+                    StyledText {
+                        anchors.right: parent.right
+                        visible: credits.reached
+                        text: "Limit reached"
+                        color: Theme.error
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
                 }
             }
         }

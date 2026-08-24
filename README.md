@@ -12,7 +12,7 @@ Claude Code and Codex subscription limits in the DankBar.
 
 | Provider | Limits | Freshness |
 | --- | --- | --- |
-| Claude | 5-hour, weekly | Live — queried on a 6 minute timer |
+| Claude | 5-hour, weekly, plus usage credits when the account has them | Live — queried on a 6 minute timer |
 | Codex | whatever windows your plan has (weekly on Plus) | Live — queried on a 6 minute timer |
 
 Each provider carries a `live` marker in the popout. When a fetch fails, that
@@ -52,6 +52,16 @@ monitors share a single fetch.
 `~/.claude/.credentials.json` and calls `api.anthropic.com/api/oauth/usage`
 with it, the same endpoint the client uses for `/usage`. The token goes
 nowhere else.
+
+That response also carries the account's overage credits, which become a
+`Credits` meter under the two windows. Money is not a window that reopens, so it
+rides beside the limits as `claude.spend` rather than among them, and stays null
+for an account with no credits enabled. Two blocks describe it — the newer
+`spend` and the older `extra_usage` — so the fetch prefers `spend` and falls
+back. Amounts stay in minor units with their own exponent (858 with exponent 2
+is $8.58) all the way to the QML, which is what keeps a zero-decimal currency
+from picking up two decimal places on the way. An account with credits switched
+on but no cap gets the amount alone: there is no fraction to draw.
 
 That endpoint allows only about two requests per five minutes, and Claude Code
 itself draws on the same budget, so a poll returning 429 is routine — hence the
@@ -104,6 +114,7 @@ Settings → Plugins → AI Usage:
 
 - **Show Claude Code** / **Show Codex**
 - **Tint the bar icon by usage**
+- **Count credit spend in the bar tint**
 
 The first two control which providers appear in Overview and contribute to the
 bar warning color. Provider tabs remain available for direct inspection.
@@ -113,6 +124,12 @@ ordinary bar text color at any utilization, and the popout still carries the
 percentages. Thresholds live in `AiUsageWidget.qml`: `warnPct` (70, amber) and
 `critPct` (90, red). The bar glyph is the `name:` on the two `DankIcon`s in the
 pill components — any Material Symbols name works.
+
+The fourth is off by default, and the default is the point: an amber bar has so
+far always meant a window that reopens on a clock the popout names. Credits do
+not reopen — they are spent — so folding them into the same color silently
+changes what it means. Turn it on to have the credit meter warn the bar too; a
+reached limit counts as 100 regardless of the percentage reported.
 
 Note that `horizontalBarPill` / `verticalBarPill` should contain **content
 only**. `PluginComponent` wraps whatever you supply in a `BasePill`, which

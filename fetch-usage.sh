@@ -11,7 +11,9 @@
 # rate-limit buckets. This is live and does not inspect session rollout logs.
 #
 # Output:
-#   {captured_at, claude: {captured_at, limits:[{label,pct,resets_at}]}|null,
+#   {captured_at, claude: {captured_at, limits:[{label,pct,resets_at}],
+#                          spend: {pct,used_minor,limit_minor,currency,exponent,
+#                                  limit_reached}|null}|null,
 #                 codex:  {captured_at, plan, limits:[...]}|null,
 #                 claude_auth: "ok"|"expired"|"signed_out"}
 #
@@ -150,8 +152,40 @@ claude_usage() {
   claude_result=$(echo "$body" | jq -c --argjson now "$now" "$JQ_LIB"'
     def lim(b; n): if b == null then empty
                    else {label: n, pct: (b.utilization | floor), resets_at: epoch(b.resets_at)} end;
+
+    # Overage credits, for accounts that have them switched on. Money is not a
+    # rate-limit window — it has a cap and no reset this response knows about —
+    # so it rides beside limits rather than inside them, and stays null when the
+    # account has no credits enabled.
+    #
+    # Amounts are minor units (858 = $8.58) with their own exponent, because
+    # that is how both blocks state them and a currency with no decimal place
+    # would not survive the round trip through a float.
+    def pct_of(used; limit): if limit == null or limit <= 0 then 0
+                             else used * 100 / limit end;
+    def spend_block:
+      (.spend // {}) as $s | (.extra_usage // {}) as $x
+      | if $s.enabled == true and $s.used.amount_minor != null then
+          {pct: (($s.percent // pct_of($s.used.amount_minor; $s.limit.amount_minor)) | floor),
+           used_minor: $s.used.amount_minor,
+           limit_minor: ($s.limit.amount_minor // 0),
+           currency: ($s.used.currency // "USD"),
+           exponent: ($s.used.exponent // 2),
+           limit_reached: (($x.spend_limit_reached // false)
+                           or ($s.severity == "limit_reached"))}
+        # The older block, and still the only one to name the cap as monthly.
+        elif $x.is_enabled == true and $x.used_credits != null then
+          {pct: (($x.utilization // pct_of($x.used_credits; $x.monthly_limit)) | floor),
+           used_minor: ($x.used_credits | floor),
+           limit_minor: ($x.monthly_limit // 0),
+           currency: ($x.currency // "USD"),
+           exponent: ($x.decimal_places // 2),
+           limit_reached: ($x.spend_limit_reached // false)}
+        else null end;
+
     {captured_at: $now,
-     limits: [lim(.five_hour; "5-hour"), lim(.seven_day; "Weekly")]}
+     limits: [lim(.five_hour; "5-hour"), lim(.seven_day; "Weekly")],
+     spend: spend_block}
   ' 2>/dev/null)
   [ -n "$claude_result" ] || claude_result=null
 }

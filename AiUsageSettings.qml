@@ -26,4 +26,11 @@ PluginSettings {
         description: "Amber past 70%, red past 90%. Off keeps the normal bar text color."
         defaultValue: true
     }
+
+    ToggleSetting {
+        settingKey: "tintOnSpend"
+        label: "Count credit spend in the bar tint"
+        description: "Let Claude usage credits warn the bar too, not just rate limits"
+        defaultValue: false
+    }
 }
