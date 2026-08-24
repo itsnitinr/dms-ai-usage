@@ -37,6 +37,10 @@ out when the line would not fit whole, rather than letting an ellipsis eat
 whichever provider comes last. The tooltip yields while the popout is open,
 including on bars that open popouts on hover.
 
+A limit passing 70% raises a desktop notification, and 90% raises a critical
+one, at most once per window per threshold. Details in **Threshold
+notifications** below.
+
 Left-click for a three-tab detail popout:
 
 - **Overview** — live used/remaining meters for both enabled providers, with no
@@ -95,6 +99,32 @@ bucket. This live-limit path never reads Codex session rollout logs.
 
 Both providers are optional — the widget renders whichever ones report.
 
+### Threshold notifications
+
+`fetch-usage.sh` raises them, not the QML, for two reasons: it is the one place
+that knows a fetch actually happened rather than a cache being served, and it
+compares the new numbers against the cache still on disk. The write and that
+comparison share a lock, so several bars on several screens produce one alert
+between them — whoever writes first alerts, and the others read back the
+snapshot just written and find nothing crossed. Thresholds are passed in from
+the widget (`--warn`, `--crit`) rather than declared a second time in shell.
+
+Only an upward crossing counts, which makes the "once per window" behaviour fall
+out of the data instead of needing to be remembered anywhere:
+
+- A bucket with no previous reading seeds silently. First run on a machine, or a
+  provider that has only started answering, will not announce a number that may
+  have been sitting there for days.
+- A window that rolls over drops to zero. That is not a crossing, and it re-arms
+  the alert for the next climb.
+- A poll that jumps clean past both thresholds reports the higher one only.
+- A carried-forward provider has identical numbers by definition, so a routine
+  429 cannot re-announce anything.
+
+Credits are the exception to the reset rule: they have a cap and no window, so
+they cross once and stay crossed until the account tops up. `--no-notify` turns
+the whole thing off, and the toggle in settings does it for you.
+
 ### Provider analytics
 
 `fetch-history.sh codex|claude` builds one provider cache on demand:
@@ -127,6 +157,7 @@ Settings → Plugins → AI Usage:
 - **Show Claude Code** / **Show Codex**
 - **Bar pill contents** — icon only, icon and percentage, or percentage only
 - **Tint the bar icon by usage**
+- **Notify at usage thresholds**
 - **Count credit spend in the bar tint**
 
 The first two control which providers appear in Overview and contribute to the
@@ -141,14 +172,23 @@ choosing on purpose rather than ending up with.
 The tint toggle turns the bar icon's warning color off entirely: the glyph holds the
 ordinary bar text color at any utilization, and the popout still carries the
 percentages. Thresholds live in `AiUsageWidget.qml`: `warnPct` (70, amber) and
-`critPct` (90, red). The bar glyph is the `name:` on the two `DankIcon`s in the
-pill components — any Material Symbols name works.
+`critPct` (90, red). They set the notification levels too — the widget passes
+them to `fetch-usage.sh` — so a bar that has gone amber and a notification
+saying so are always the same event. The bar glyph is the `name:` on the
+`DankIcon` in `BarPill` — any Material Symbols name works.
 
-The fourth is off by default, and the default is the point: an amber bar has so
+**Notify at usage thresholds** is on by default. A normal notification at
+`warnPct`, a critical one at `critPct`, carrying the provider's own icon and how
+long the window has left.
+
+**Count credit spend in the bar tint** is off by default, and the default is the
+point: an amber bar has so
 far always meant a window that reopens on a clock the popout names. Credits do
 not reopen — they are spent — so folding them into the same color silently
 changes what it means. Turn it on to have the credit meter warn the bar too; a
-reached limit counts as 100 regardless of the percentage reported.
+reached limit counts as 100 regardless of the percentage reported. This governs
+the bar color only — notifications are a separate channel and always cover
+credits.
 
 Note that `horizontalBarPill` / `verticalBarPill` should contain **content
 only**. `PluginComponent` wraps whatever you supply in a `BasePill`, which
@@ -189,7 +229,13 @@ qs -p /usr/share/quickshell/dms log | tail   # QML errors land here
 ```
 
 Requires `bash`, `jq`, and `curl`. Codex limits additionally require a recent
-`codex` CLI signed in with ChatGPT.
+`codex` CLI signed in with ChatGPT. Threshold notifications need `notify-send`
+from libnotify; without it they are skipped and nothing else changes.
+
+```sh
+# Watch a crossing without waiting for one, against a scratch cache:
+CACHE_FILE=/tmp/usage.json MIN_AGE=0 sh fetch-usage.sh --notify --warn 5 --crit 15
+```
 
 ### Adding new QML files
 

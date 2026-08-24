@@ -40,6 +40,13 @@ PluginSettings {
     }
 
     ToggleSetting {
+        settingKey: "notifyThresholds"
+        label: "Notify at usage thresholds"
+        description: "Once per window as a limit passes 70%, again at 90%"
+        defaultValue: true
+    }
+
+    ToggleSetting {
         settingKey: "tintOnSpend"
         label: "Count credit spend in the bar tint"
         description: "Let Claude usage credits warn the bar too, not just rate limits"

@@ -22,6 +22,7 @@ PluginComponent {
     // an amber bar that cannot be waited out is a different message from the one
     // this tint has meant until now. Opt in to fold them together.
     readonly property bool tintOnSpend: pluginData.tintOnSpend === true
+    readonly property bool notifyThresholds: pluginData.notifyThresholds !== false
     readonly property real contentPadding: Theme.spacingS
 
     property int currentTab: 0            // Overview, Codex, Claude
@@ -48,6 +49,24 @@ PluginComponent {
         when: dataLoader.item !== null
         property: "activeProvider"
         value: root.activeProvider
+    }
+    Binding {
+        target: dataLoader.item
+        when: dataLoader.item !== null
+        property: "notifyThresholds"
+        value: root.notifyThresholds
+    }
+    Binding {
+        target: dataLoader.item
+        when: dataLoader.item !== null
+        property: "warnPct"
+        value: root.warnPct
+    }
+    Binding {
+        target: dataLoader.item
+        when: dataLoader.item !== null
+        property: "critPct"
+        value: root.critPct
     }
 
     readonly property bool hasData: usageData?.hasData ?? false

@@ -184,9 +184,21 @@ Item {
         return history !== null && now - (history.captured_at || 0) > refreshSeconds * 2
     }
 
+    // Threshold alerts are the script's job, not this file's: it is the one
+    // place that knows a fetch actually happened, and it compares against the
+    // cache on disk, so several bars on several screens produce one alert
+    // between them instead of one each. The thresholds ride along from the
+    // widget rather than being declared a second time down there.
+    property bool notifyThresholds: true
+    property int warnPct: 70
+    property int critPct: 90
+
     function refreshLimits() {
         lastFetchAt = now
-        Proc.runCommand("aiUsage.fetch", ["sh", scriptPath], function () {
+        const args = ["sh", scriptPath,
+                      notifyThresholds ? "--notify" : "--no-notify",
+                      "--warn", String(warnPct), "--crit", String(critPct)]
+        Proc.runCommand("aiUsage.fetch", args, function () {
             root.fetchedOnce = true
         }, 100, 20000)
     }

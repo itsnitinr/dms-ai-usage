@@ -17,6 +17,10 @@
 #                 codex:  {captured_at, plan, limits:[...]}|null,
 #                 claude_auth: "ok"|"expired"|"signed_out"}
 #
+# Args:
+#   --notify | --no-notify   desktop alerts on a threshold crossing (default on)
+#   --warn N   --crit N      crossing thresholds (default 70 and 90)
+#
 # Env:
 #   CACHE_FILE      cache path (default $XDG_CACHE_HOME/dms-ai-usage.json)
 #   CLAUDE_CREDS    Claude Code credentials (default ~/.claude/.credentials.json)
@@ -39,6 +43,24 @@ min_age="${MIN_AGE:-150}"
 max_stale="${MAX_STALE:-3600}"
 now=$(date +%s)
 script_dir=$(CDPATH= cd -P "$(dirname "$0")" 2>/dev/null && pwd)
+tab=$(printf '\t')
+
+# Thresholds come from the widget rather than being declared twice; these are
+# the fallbacks for a hand-run.
+notify=1
+warn_pct=70
+crit_pct=90
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --notify) notify=1 ;;
+    --no-notify) notify=0 ;;
+    --warn) shift; warn_pct="${1:-$warn_pct}" ;;
+    --crit) shift; crit_pct="${1:-$crit_pct}" ;;
+  esac
+  shift
+done
+case "$warn_pct" in ''|*[!0-9]*) warn_pct=70 ;; esac
+case "$crit_pct" in ''|*[!0-9]*) crit_pct=90 ;; esac
 
 mkdir -p "$(dirname "$cache")" 2>/dev/null
 
@@ -280,7 +302,91 @@ out=$(jq -n --argjson now "$now" --argjson claude "$c" --argjson codex "$x" \
   --arg auth "$claude_auth" \
   '{captured_at: $now, claude: $claude, codex: $codex, claude_auth: $auth}') || exit 1
 
+countdown() {
+  [ "${1:-0}" -gt 0 ] 2>/dev/null || return 0
+  seconds=$(($1 - now))
+  [ "$seconds" -gt 0 ] || { printf 'now'; return 0; }
+  days=$((seconds / 86400))
+  hours=$(((seconds % 86400) / 3600))
+  minutes=$(((seconds % 3600) / 60))
+  if [ "$days" -gt 0 ]; then printf '%dd %dh' "$days" "$hours"
+  elif [ "$hours" -gt 0 ]; then printf '%dh %dm' "$hours" "$minutes"
+  else printf '%dm' "$minutes"; fi
+}
+
+# Announce a bucket that has just crossed a threshold on the way up, and nothing
+# else. A bucket with no previous reading — first run on this machine, or a
+# provider that has only now started answering — seeds silently rather than
+# announcing a number that may have been sitting there for days. A window that
+# has rolled over drops to zero, which is not a crossing, so the alert re-arms
+# for the next climb without anything having to remember it did. Crossing both
+# thresholds between two polls reports the higher one only.
+notify_crossings() {
+  [ "$notify" -eq 1 ] || return 0
+  command -v notify-send >/dev/null 2>&1 || return 0
+
+  jq -rn --argjson before "$1" --argjson after "$2" \
+         --argjson warn "$warn_pct" --argjson crit "$crit_pct" '
+    def buckets($snap):
+      [($snap.claude.limits // [])[]
+       | {key: ("claude|" + .label), provider: "claude",
+          name: ("Claude " + .label), pct: .pct, resets_at: .resets_at}]
+      + [($snap.codex.limits // [])[]
+         | {key: ("codex|" + .label), provider: "codex",
+            name: ("Codex " + .label), pct: .pct, resets_at: .resets_at}]
+      # Credits have a cap and no reset, so they cross once and stay crossed
+      # until the account tops up — which is the whole point of saying so.
+      + (if $snap.claude.spend == null then []
+         else [{key: "claude|credits", provider: "claude",
+                name: "Claude credits", pct: $snap.claude.spend.pct,
+                resets_at: null}] end);
+
+    (buckets($before) | INDEX(.key)) as $was
+    | buckets($after)[]
+    | . as $now
+    | ($was[$now.key] // null) as $then
+    | select($then != null)
+    | ([$crit, $warn] | map(select($then.pct < . and $now.pct >= .)) | first) as $level
+    | select($level != null)
+    | [$level, $now.provider, $now.name, $now.pct, ($now.resets_at // 0)] | @tsv
+  ' 2>/dev/null | while IFS="$tab" read -r level provider name pct reset; do
+    [ -n "$name" ] || continue
+    urgency=normal
+    [ "$level" = "$crit_pct" ] && urgency=critical
+    summary="$name at ${pct}% used"
+    body=$(when=$(countdown "$reset"); [ -n "$when" ] && printf 'Resets in %s' "$when")
+    icon="$script_dir/assets/$provider.svg"
+    if [ -f "$icon" ]; then
+      notify-send -a "AI Usage" -u "$urgency" -i "$icon" "$summary" "$body" 2>/dev/null
+    else
+      notify-send -a "AI Usage" -u "$urgency" "$summary" "$body" 2>/dev/null
+    fi
+  done
+  return 0
+}
+
+# The cache write and the comparison that drives alerts belong together, because
+# the comparison is against whatever is on disk at that moment. Two bars on two
+# screens fetch independently and can land on the same crossing: under this lock
+# whoever writes first alerts, and the other reads back the snapshot just
+# written, finds nothing crossed, and stays quiet.
+lock="$cache.notify.lock"
+# A run killed between mkdir and rmdir would otherwise silence alerts for good,
+# so a lock nothing has touched for a minute counts as abandoned.
+if [ -d "$lock" ] && [ -z "$(find "$lock" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then
+  rmdir "$lock" 2>/dev/null
+fi
+
 tmp="$cache.tmp.$$"
-printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
+if mkdir "$lock" 2>/dev/null; then
+  before=$(jq -c . "$cache" 2>/dev/null) || before=null
+  [ -n "$before" ] || before=null
+  printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
+  notify_crossings "$before" "$out"
+  rmdir "$lock" 2>/dev/null
+else
+  printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
+fi
+
 printf '%s' "$out"
 exit 0
