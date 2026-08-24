@@ -211,6 +211,7 @@ bar's settings.
 | `UsageProviderPage.qml` | provider limits, daily bars, and weekly model breakdown |
 | `AiUsageWidget.qml` | bar pills (horizontal + vertical) and popout |
 | `AiUsageSettings.qml` | settings page |
+| `tests/run.sh` | fixture tests for all three scripts |
 | `assets/*.svg` | provider logos, normalized to a white fill |
 
 The logos ship with a `#ffffff` fill so `DankSVGIcon`'s `colorOverride` lands
@@ -236,6 +237,38 @@ from libnotify; without it they are skipped and nothing else changes.
 # Watch a crossing without waiting for one, against a scratch cache:
 CACHE_FILE=/tmp/usage.json MIN_AGE=0 sh fetch-usage.sh --notify --warn 5 --crit 15
 ```
+
+### Tests
+
+```sh
+sh tests/run.sh                  # everything, about six seconds
+sh tests/run.sh usage notify     # one or more sections
+```
+
+`sh` and `jq` and nothing else: no network, no Claude or Codex install, no
+notification daemon, no shell running. Recorded responses arrive through the
+test seams at the top of `fetch-usage.sh` (`CLAUDE_USAGE_BODY`,
+`CLAUDE_USAGE_STATUS`, `CODEX_LIMITS_FILE`), the Codex app-server is a stub on
+`PATH`, and so is `notify-send` — it writes its arguments to a file the tests
+read back.
+
+Session-log fixtures are generated rather than stored. Every window these
+scripts compute is relative to now, so a file with last Tuesday's timestamps in
+it stops meaning what it meant by Thursday.
+
+The suite exists mainly for two kinds of failure that are invisible from the
+bar. A parser that quietly stops matching after a CLI update — both providers
+reshape their logs without notice, and the daily bars would simply read zero.
+And a notification that stops firing, which by its nature announces itself only
+by never arriving. Both of those found real bugs the first time it ran: an
+expired token could not reach the widget on a machine with no cache yet, and a
+second bar racing the first erased the snapshot the crossing check compares
+against.
+
+A test named after the behaviour it protects is the point. `a window reset is
+silent` and `a carried-forward entry cannot re-alert` are the two rules that
+make "once per window" work without any state; if either name shows up red,
+that is the rule that broke.
 
 ### Adding new QML files
 

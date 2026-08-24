@@ -38,8 +38,15 @@ while (( SECONDS - started_at < timeout_seconds )); do
     exit 1
   fi
 
+  # Either shape counts. fetch-usage.sh reads rateLimitsByLimitId in preference
+  # to rateLimits, so gating on the latter alone would drop a response the
+  # consumer can read perfectly well — which is what an app-server that stops
+  # sending the flat field would send.
   response=$(printf '%s\n' "$line" \
-    | jq -ce 'select(.id == 1 and .result.rateLimits != null)' 2>/dev/null) || continue
+    | jq -ce 'select(.id == 1
+                     and (.result.rateLimits != null
+                          or ((.result.rateLimitsByLimitId // {}) | length) > 0))' \
+      2>/dev/null) || continue
   printf '%s\n' "$response"
   exit 0
 done

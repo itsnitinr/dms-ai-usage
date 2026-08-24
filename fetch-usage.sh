@@ -29,6 +29,12 @@
 #   MIN_AGE         seconds before a cached result is refetched (default 150)
 #   MAX_STALE       seconds a failed provider keeps its previous entry (default 3600)
 #
+# Test seams, so tests/run.sh can exercise this without a network, a Claude
+# install, or a Codex sign-in. Unset in normal use:
+#   CLAUDE_USAGE_BODY    file holding a recorded usage response, instead of curl
+#   CLAUDE_USAGE_STATUS  the HTTP status to pair with it (default 200)
+#   CODEX_LIMITS_FILE    file holding a recorded app-server response
+#
 # Exit: 0 if at least one provider reported, 1 if neither did. A run where
 #       neither reported leaves the cache untouched, so a transient failure —
 #       no network yet after a resume from sleep, say — does not erase the last
@@ -150,16 +156,21 @@ claude_usage() {
   claude_result=null
   [ "$claude_auth" = ok ] || return
 
-  ver=$(claude_version)
-  nl='
+  if [ -n "${CLAUDE_USAGE_BODY:-}" ]; then
+    body=$(cat "$CLAUDE_USAGE_BODY" 2>/dev/null)
+    status="${CLAUDE_USAGE_STATUS:-200}"
+  else
+    ver=$(claude_version)
+    nl='
 '
-  body=$(curl -s -m 10 -w "$nl%{http_code}" \
-    -H "Authorization: Bearer $claude_token" \
-    -H "anthropic-beta: oauth-2025-04-20" \
-    -H "User-Agent: claude-code/${ver:-2.1.0}" \
-    https://api.anthropic.com/api/oauth/usage 2>/dev/null)
-  status=${body##*"$nl"}
-  body=${body%"$nl"*}
+    body=$(curl -s -m 10 -w "$nl%{http_code}" \
+      -H "Authorization: Bearer $claude_token" \
+      -H "anthropic-beta: oauth-2025-04-20" \
+      -H "User-Agent: claude-code/${ver:-2.1.0}" \
+      https://api.anthropic.com/api/oauth/usage 2>/dev/null)
+    status=${body##*"$nl"}
+    body=${body%"$nl"*}
+  fi
 
   # A token the server turns down is expired in the only sense that matters
   # here, whether or not its recorded expiry has come round: a revoked or
@@ -213,10 +224,13 @@ claude_usage() {
 }
 
 codex_usage() {
-  command -v bash >/dev/null 2>&1 || { echo null; return; }
-  [ -n "$script_dir" ] || { echo null; return; }
-
-  response=$(bash "$script_dir/fetch-codex-limits.sh" 2>/dev/null) || { echo null; return; }
+  if [ -n "${CODEX_LIMITS_FILE:-}" ]; then
+    response=$(cat "$CODEX_LIMITS_FILE" 2>/dev/null) || { echo null; return; }
+  else
+    command -v bash >/dev/null 2>&1 || { echo null; return; }
+    [ -n "$script_dir" ] || { echo null; return; }
+    response=$(bash "$script_dir/fetch-codex-limits.sh" 2>/dev/null) || { echo null; return; }
+  fi
   [ -n "$response" ] || { echo null; return; }
 
   echo "$response" | jq --argjson now "$now" '
@@ -270,6 +284,19 @@ if [ "$c" = null ] && [ "$x" = null ]; then
       printf '%s' "$stamped"
     else
       cat "$cache"
+    fi
+  else
+    # Nothing to stamp the verdict onto, and it is still the only thing worth
+    # saying: a machine whose one provider is Claude, with a lapsed token and a
+    # cold cache, would otherwise never find out why it has nothing to show —
+    # and an expired token is the state the widget stays in the bar to explain.
+    # Providers are null, so this remains a failure and exits as one.
+    empty=$(jq -n --argjson now "$now" --arg auth "$claude_auth" \
+      '{captured_at: $now, claude: null, codex: null, claude_auth: $auth}')
+    if [ -n "$empty" ]; then
+      tmp="$cache.tmp.$$"
+      printf '%s' "$empty" > "$tmp" && mv -f "$tmp" "$cache"
+      printf '%s' "$empty"
     fi
   fi
   exit 1
@@ -367,26 +394,43 @@ notify_crossings() {
 
 # The cache write and the comparison that drives alerts belong together, because
 # the comparison is against whatever is on disk at that moment. Two bars on two
-# screens fetch independently and can land on the same crossing: under this lock
-# whoever writes first alerts, and the other reads back the snapshot just
-# written, finds nothing crossed, and stays quiet.
+# screens fetch independently and can land on the same crossing: whoever gets
+# here first writes and alerts, and whoever comes second reads back the snapshot
+# just written, sees nothing crossed, and stays quiet.
+#
+# Which is why a run that loses the race waits for the lock rather than writing
+# around it. A write from outside would land between the winner's read and its
+# own write, replacing the old numbers with the new ones — and the winner would
+# then compare the new against the new and find no crossing at all. The dedupe
+# is that ordering, so nothing may write without holding the lock.
 lock="$cache.notify.lock"
-# A run killed between mkdir and rmdir would otherwise silence alerts for good,
-# so a lock nothing has touched for a minute counts as abandoned.
-if [ -d "$lock" ] && [ -z "$(find "$lock" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then
-  rmdir "$lock" 2>/dev/null
-fi
-
 tmp="$cache.tmp.$$"
-if mkdir "$lock" 2>/dev/null; then
-  before=$(jq -c . "$cache" 2>/dev/null) || before=null
-  [ -n "$before" ] || before=null
-  printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
-  notify_crossings "$before" "$out"
-  rmdir "$lock" 2>/dev/null
-else
-  printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
-fi
+waited=0
+
+while ! mkdir "$lock" 2>/dev/null; do
+  # A run killed between mkdir and rmdir would otherwise wedge every later
+  # fetch, so a lock nothing has touched for a minute counts as abandoned.
+  if [ -d "$lock" ] && [ -z "$(find "$lock" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then
+    rmdir "$lock" 2>/dev/null
+    continue
+  fi
+  waited=$((waited + 1))
+  # Held, and not stale yet. A fetch takes a second or two, so this waits out
+  # an ordinary one and then gives up: publishing late beats not publishing,
+  # and a missed alert is a smaller loss than a snapshot that never lands.
+  if [ "$waited" -gt 50 ]; then
+    printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
+    printf '%s' "$out"
+    exit 0
+  fi
+  sleep 0.1
+done
+
+before=$(jq -c . "$cache" 2>/dev/null) || before=null
+[ -n "$before" ] || before=null
+printf '%s' "$out" > "$tmp" && mv -f "$tmp" "$cache"
+notify_crossings "$before" "$out"
+rmdir "$lock" 2>/dev/null
 
 printf '%s' "$out"
 exit 0
