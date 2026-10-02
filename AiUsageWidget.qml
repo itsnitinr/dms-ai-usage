@@ -106,6 +106,9 @@ PluginComponent {
     readonly property bool showClaudeLimits: showClaude && claudeLimits.length > 0
     // Null unless the account has overage credits switched on.
     readonly property var claudeSpend: showClaude ? (usageData?.claude?.spend ?? null) : null
+    // Free Codex limit resets, soonest expiry first. Null from an app-server
+    // that does not report them. Tab-only, so it ignores showCodex.
+    readonly property var codexResets: usageData?.codex?.resets ?? null
     // Credits arrive in the same entry as the limits, so in practice they show
     // up together — but the section is worth drawing for either one alone
     // rather than letting the amount vanish with the windows.
@@ -800,6 +803,12 @@ PluginComponent {
                         when: providerLoader.item !== null
                         property: "spend"
                         value: root.activeProvider === "claude" ? root.claudeSpend : null
+                    }
+                    Binding {
+                        target: providerLoader.item
+                        when: providerLoader.item !== null
+                        property: "resets"
+                        value: root.activeProvider === "codex" ? root.codexResets : null
                     }
                     Binding {
                         target: providerLoader.item

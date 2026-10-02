@@ -13,7 +13,7 @@ Claude Code and Codex subscription limits in the DankBar.
 | Provider | Limits | Freshness |
 | --- | --- | --- |
 | Claude | 5-hour, weekly, plus usage credits when the account has them | Live — queried on a 6 minute timer |
-| Codex | whatever windows your plan has (weekly on Plus) | Live — queried on a 6 minute timer |
+| Codex | whatever windows your plan has (weekly on Plus), plus any free resets granted | Live — queried on a 6 minute timer |
 
 Each provider carries a `live` marker in the popout. When a fetch fails, that
 provider keeps its previous numbers and the marker becomes their age (`7m ago`)
@@ -96,6 +96,14 @@ a token is expired so the explanation stays reachable.
 `account/rateLimits/read` JSON-RPC method. The response includes the live usage
 percentage, window duration, reset time, and plan for every metered limit
 bucket. This live-limit path never reads Codex session rollout logs.
+
+The same response lists the free rate-limit resets the account has been granted.
+Unspent, unexpired ones become `codex.resets` — `[{title, expires_at}]`, soonest
+expiry first — and the Codex tab lists them under a `Resets` heading with how
+long each has left, plus the date it lapses. They sit apart from the limits because a reset empties a
+window rather than filling one, and what it runs out of is calendar time. An
+app-server that does not report resets leaves the field `null`; an account with
+none gets `[]`.
 
 Both providers are optional — the widget renders whichever ones report.
 

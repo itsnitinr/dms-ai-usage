@@ -18,6 +18,8 @@ Column {
     property var limits: []
     // Overage credits, for a provider and account that have them. Null otherwise.
     property var spend: null
+    // Free limit resets the account holds, soonest expiry first. Codex only.
+    property var resets: null
     property var history: null
     property bool historyLoading: false
     property bool historyFailed: false
@@ -34,6 +36,15 @@ Column {
     readonly property real modelPeak: maximum(models)
     readonly property real weeklyTotal: total(daily)
     readonly property real preferredHeight: childrenRect.y + childrenRect.height
+    // A snapshot can be carried forward for up to an hour, and a credit that
+    // lapsed in that hour is no longer one the account can spend.
+    readonly property var liveResets: (resets ?? []).filter(
+        credit => !credit.expires_at || credit.expires_at > now)
+    // Every reset granted so far is a "Full reset", and four rows saying so
+    // bury the dates. The title earns its place only once there is a second
+    // kind to tell apart.
+    readonly property bool resetTitlesVary:
+        liveResets.some(credit => credit.title !== liveResets[0].title)
 
     spacing: Theme.spacingL
     topPadding: Theme.spacingS
@@ -107,6 +118,12 @@ Column {
 
     function resetLabel(reset) {
         return reset ? "Resets in " + countdown(reset) : "Window not started"
+    }
+
+    function expiryLabel(credit) {
+        const left = credit.expires_at ? countdown(credit.expires_at) + " left"
+                                       : "No expiry"
+        return resetTitlesVary ? credit.title + " · " + left : left
     }
 
     // Follows the shell's own clock preference, minus its seconds setting —
@@ -435,6 +452,51 @@ Column {
             color: Theme.surfaceVariantText
             font.pixelSize: Theme.fontSizeSmall
             wrapMode: Text.WordWrap
+        }
+    }
+
+    // Held apart from the limits rather than among them: a reset is not a
+    // window filling up but a way to empty one early, and what it runs out of
+    // is calendar time.
+    Column {
+        width: parent.width
+        visible: root.liveResets.length > 0
+        spacing: Theme.spacingS
+
+        Item {
+            width: parent.width
+            height: resetsTitle.implicitHeight
+            SectionTitle { id: resetsTitle; anchors.left: parent.left; text: "Resets" }
+            StyledText {
+                anchors.right: parent.right
+                text: root.liveResets.length + " available"
+                color: Theme.surfaceTextMedium
+                font.pixelSize: Theme.fontSizeSmall
+            }
+        }
+
+        Repeater {
+            model: root.liveResets
+
+            delegate: Item {
+                required property var modelData
+                width: parent.width
+                height: expiryText.implicitHeight
+
+                StyledText {
+                    id: expiryText
+                    anchors.left: parent.left
+                    text: root.expiryLabel(modelData)
+                    color: Theme.surfaceText
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+                StyledText {
+                    anchors.right: parent.right
+                    text: root.resetTime(modelData.expires_at)
+                    color: Theme.surfaceVariantText
+                    font.pixelSize: Theme.fontSizeSmall
+                }
+            }
         }
     }
 

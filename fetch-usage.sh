@@ -14,7 +14,8 @@
 #   {captured_at, claude: {captured_at, limits:[{label,pct,resets_at}],
 #                          spend: {pct,used_minor,limit_minor,currency,exponent,
 #                                  limit_reached}|null}|null,
-#                 codex:  {captured_at, plan, limits:[...]}|null,
+#                 codex:  {captured_at, plan, limits:[...],
+#                          resets: [{title,expires_at}]|null}|null,
 #                 claude_auth: "ok"|"expired"|"signed_out"}
 #
 # Args:
@@ -251,6 +252,13 @@ codex_usage() {
        then [$result.rateLimitsByLimitId[]]
        elif $result.rateLimits != null then [$result.rateLimits]
        else [] end) as $buckets
+    # Free resets the account has been granted and not yet spent. Each one
+    # wipes the limits on demand and lapses on its own date, so the expiry is
+    # the part worth carrying; the soonest goes first because it is the one to
+    # use first. Null rather than [] when the response has no such block, so
+    # an app-server too old to say stays distinguishable from an account that
+    # simply has none.
+    | ($result.rateLimitResetCredits // null) as $reset_credits
     | {captured_at: $now,
        plan: ($result.rateLimits.planType
               // ($buckets | map(.planType) | map(select(. != null)) | first)
@@ -258,7 +266,13 @@ codex_usage() {
        limits: [$buckets[]
                 | . as $bucket
                 | lim($bucket.primary; $bucket.limitName),
-                  lim($bucket.secondary; $bucket.limitName)]}
+                  lim($bucket.secondary; $bucket.limitName)],
+       resets: (if $reset_credits == null then null
+                else [($reset_credits.credits // [])[]
+                      | select((.status // "available") == "available"
+                               and (.expiresAt == null or .expiresAt > $now))
+                      | {title: (.title // "Reset"), expires_at: .expiresAt}]
+                     | sort_by(.expires_at == null, .expires_at) end)}
     | select(.limits | length > 0)
   ' 2>/dev/null || echo null
 }

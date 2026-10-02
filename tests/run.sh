@@ -260,6 +260,31 @@ test_usage() {
         "$(usage --codex "$work/codex-by-id.json" | jq -r '.codex.limits[0].label')"
     is "by-id-only response still yields the plan" "plus" \
         "$(usage --codex "$work/codex-by-id.json" | jq -r '.codex.plan')"
+
+    # Reset credits. Expiries are relative to now, for the same reason the
+    # session logs are generated: the recorded fixture's one credit has already
+    # lapsed, which is a fine test of the filter and no test of anything else.
+    jq -c --argjson now "$now" '
+        .result.rateLimitResetCredits.credits = [
+          {title: "Full reset", status: "available", expiresAt: ($now + 864000)},
+          {title: "Full reset", status: "available", expiresAt: ($now + 86400)},
+          {title: "Full reset", status: "available", expiresAt: ($now - 60)},
+          {title: "Full reset", status: "redeemed",  expiresAt: ($now + 172800)}]
+    ' "$fixtures/codex-ratelimits.json" > "$work/codex-resets.json"
+    out=$(usage --codex "$work/codex-resets.json")
+    is "only unexpired, unspent resets are kept" "2" \
+        "$(printf '%s' "$out" | jq '.codex.resets | length')"
+    is "the soonest expiry comes first" "$((now + 86400))" \
+        "$(printf '%s' "$out" | jq '.codex.resets[0].expires_at')"
+    is "resets carry their title" "Full reset" \
+        "$(printf '%s' "$out" | jq -r '.codex.resets[0].title')"
+    is "a lapsed credit leaves an empty list, not null" "[]" \
+        "$(usage --codex "$fixtures/codex-ratelimits.json" | jq -c '.codex.resets')"
+
+    jq -c 'del(.result.rateLimitResetCredits)' "$fixtures/codex-ratelimits.json" \
+        > "$work/codex-no-resets.json"
+    is "a response without the block reports null" "null" \
+        "$(usage --codex "$work/codex-no-resets.json" | jq -c '.codex.resets')"
 }
 
 # ---------------------------------------------------------------------------
